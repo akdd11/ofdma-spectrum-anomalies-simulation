@@ -213,7 +213,9 @@ def upsample_rb_to_re(rb, n_subcarriers_per_rb, n_symbols_per_rb):
     return re
 
 
-def get_total_allocated_resources(sample, subcarriers_per_rb, symbols_per_slot, return_binary=True):
+def get_total_allocated_resources(
+    sample, subcarriers_per_rb, symbols_per_slot, return_binary=True
+):
     """Get the total allocated resources for all transmitters in the sample.
 
     Parameters
@@ -241,7 +243,9 @@ def get_total_allocated_resources(sample, subcarriers_per_rb, symbols_per_slot, 
         sample.transmitters[0].resources, dtype=np.int
     )
     for tx_id, tx in enumerate(sample.transmitters):
-        total_allocated_resources = total_allocated_resources + tx.resources * (tx_id + 1)
+        total_allocated_resources = total_allocated_resources + tx.resources * (
+            tx_id + 1
+        )
 
     if return_binary:
         total_allocated_resources = total_allocated_resources > 0

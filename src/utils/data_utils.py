@@ -31,7 +31,7 @@ def get_datapath(repo_name: str):
     Parameters
     ----------
     repo_name : str
-        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation
+        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation'
 
     Returns
     -------
