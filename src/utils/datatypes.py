@@ -85,6 +85,27 @@ class Sample:
         Dictionary containing the spectrogram of each SU.
         The spectrogram only contains the magnitude in logarithmic domain,
         i .e., it is real-valued and the unit is dBm.
+    sjr_by_su: dict
+        Signal-to-jammer ratio per SU in dB, averaged over the whole
+        time-frequency grid.
+    snr_by_su: dict
+        Signal-to-noise ratio per SU in dB, averaged over the whole
+        time-frequency grid.
+    jammer_occupancy: float
+        Fraction of the resource elements of the time-frequency grid that are
+        occupied by the jammer. The jammer footprint does not depend on the SU,
+        hence this is a sample level quantity. NaN if there is no jammer.
+    jsnr_local_by_su: dict
+        Jammer-to-signal-plus-noise ratio per SU in dB, evaluated only on the
+        resource elements occupied by the jammer. Positive values indicate that
+        the jammer dominates its own footprint.
+    db_contrast_global_by_su: dict
+        Mean change of the spectrogram in dB caused by the jammer, averaged
+        over all resource elements. This corresponds to a mean pooled anomaly
+        score, i.e., a sparse jammer is diluted in the same way.
+    db_contrast_local_by_su: dict
+        Mean change of the spectrogram in dB caused by the jammer, averaged
+        only over the resource elements occupied by the jammer.
     """
 
     def __init__(self):
@@ -98,6 +119,10 @@ class Sample:
         self.noise_power_per_su = {}
         self.sjr_by_su = {}
         self.snr_by_su = {}
+        self.jammer_occupancy = np.nan
+        self.jsnr_local_by_su = {}
+        self.db_contrast_global_by_su = {}
+        self.db_contrast_local_by_su = {}
 
     def add_transmitter(self, transmitter):
         """

@@ -1,9 +1,12 @@
 """This script converts custom dataset samples into images for further processing.
 
-In addition, it generates a labels file containing the jammer type, and the number of
-legitimate transmitters for each sample. Also, a metadata file
-containing the minimum and maximum values of the spectrograms is generated to enable
-rescaling of the spectrograms back to their original values.
+Spectrograms are clipped to a percentile-based value range (see
+`compute_clipping_values`) before being scaled to 8-bit PNGs, so that the
+limited 8-bit resolution is not dominated by rare outlier values. In addition,
+it generates a labels file containing the jammer type, and the number of
+legitimate transmitters for each sample. Also, a metadata file containing the
+clipping bounds of the spectrograms is generated to enable rescaling of the
+spectrograms back to their original values.
 """
 
 __docformat__ = "numpy"
@@ -13,6 +16,7 @@ import sys
 
 import argparse
 import pickle as pkl
+import warnings
 from glob import glob
 import hydra
 import numpy as np
@@ -30,79 +34,186 @@ from src.utils.data_utils import (
     get_datapath,
     get_spectrogram_img_filenamename,
     get_resource_alloc_img_filenamename,
+    generate_dataset_splits,
 )
 
 # initialize the datasets path
 _datapath = get_datapath(_repo_name)
 
+# metrics that are stored per SU in the samples and that are written to one
+# column per SU in the labels file
+PER_SU_METRICS = [
+    "snr_by_su",
+    "sjr_by_su",
+    "jsnr_local_by_su",
+    "db_contrast_global_by_su",
+    "db_contrast_local_by_su",
+]
 
-def find_min_max_values(filenames):
-    """Finding the minimum and maximum values of the spectrograms
-    across all samples in the dataset (PT and DT) to ensure consistent
-    scaling across all images.
+# Percentiles used to derive the clipping range for the 8-bit PNG conversion.
+# The lower bound is taken from the distribution of all spectrogram values
+# (jammed and non-jammed), the upper bound only from jammed samples, since
+# jammer power is the anomaly-relevant signal and must not be clipped away
+# too aggressively. Values were chosen based on the analysis in
+# `notebooks/analyze_clipping_percentiles.ipynb`.
+CLIP_LOW_PERCENTILE = 0.1
+CLIP_HIGH_PERCENTILE_JAMMED = 99.99
+CLIP_HISTOGRAM_BINS = 4000
+
+# Generously wide value range assumed to fix the histogram bin edges up
+# front, so the value histograms can be built in a single pass over the
+# sample files instead of requiring one pass to find the exact min/max
+# before a second pass to bin the values. It does not need to be exact - it
+# only needs to safely contain all realistic spectrogram values; a runtime
+# warning is raised in `compute_clipping_values` if the actual data exceeds
+# it, since values outside this range are silently excluded from the
+# histogram and could then bias the estimated percentiles.
+ASSUMED_VALUE_RANGE_DB = (-260.0, 80.0)
+
+
+def _weighted_percentile(bin_edges, counts, percentile):
+    """Compute a percentile from a histogram via linear interpolation of the CDF.
+
+    Parameters
+    ----------
+    bin_edges : np.ndarray
+        Edges of the histogram bins, as returned by `np.histogram`.
+    counts : np.ndarray
+        Counts per bin, as returned by `np.histogram`.
+    percentile : float
+        Percentile to compute, in [0, 100].
+
+    Returns
+    -------
+    float
+        The value at the given percentile.
+    """
+
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    cum_counts = np.cumsum(counts)
+    target = percentile / 100.0 * cum_counts[-1]
+    return float(np.interp(target, cum_counts, bin_centers))
+
+
+def compute_clipping_values(
+    filenames,
+    low_percentile=CLIP_LOW_PERCENTILE,
+    high_percentile_jammed=CLIP_HIGH_PERCENTILE_JAMMED,
+    num_bins=CLIP_HISTOGRAM_BINS,
+    assumed_value_range=ASSUMED_VALUE_RANGE_DB,
+):
+    """Compute the clipping range used to scale spectrograms into 8-bit PNGs.
+
+    The dataset-wide value range (min/max across all samples) is much wider
+    than what most samples actually use, since a small fraction of extreme
+    outlier values dominate it. Clipping to a percentile-based range before
+    the min-max normalization therefore recovers substantially more of the
+    8-bit resolution for the value range that samples actually occupy.
+
+    The lower clip bound is computed from the distribution of all spectrogram
+    values, since low values are dominated by the noise floor and carry no
+    anomaly-relevant information. The upper clip bound is computed only from
+    samples that contain a jammer, since jammer power is exactly the signal
+    an anomaly detector needs to see, and clipping it based on the full
+    (mostly non-jammed) distribution would cut it too aggressively.
+
+    Both percentiles are estimated from histograms built in a single pass
+    over the sample files (using `assumed_value_range` for the bin edges),
+    so memory usage stays independent of the dataset size and the sample
+    files only need to be read once here (matching the one read for image
+    generation afterwards).
 
     Parameters
     ----------
     filenames : list
         List of filenames containing the samples.
+    low_percentile : float
+        Percentile (over all samples) used for the lower clip bound.
+    high_percentile_jammed : float
+        Percentile (over jammed samples only) used for the upper clip bound.
+    num_bins : int
+        Number of histogram bins used to estimate the percentiles.
+    assumed_value_range : tuple of float
+        (min, max) used to fix the histogram bin edges up front. Must safely
+        contain the actual data range; violations are reported as a warning.
 
     Returns
     -------
-    min_val : float
-        Minimum value found in the spectrograms.
-    max_val : float
-        Maximum value found in the spectrograms.
+    clip_min : float
+        Lower clipping bound.
+    clip_max : float
+        Upper clipping bound.
     """
 
-    p_bar = tqdm(total=len(filenames), desc="Finding min and max values")
+    bin_edges = np.linspace(assumed_value_range[0], assumed_value_range[1], num_bins + 1)
+    hist_all = np.zeros(num_bins, dtype=np.int64)
+    hist_jammed = np.zeros(num_bins, dtype=np.int64)
 
     min_val = np.inf
     max_val = -np.inf
+
+    p_bar = tqdm(total=len(filenames), desc="Building value histograms")
     for filename in filenames:
         with open(filename, "rb") as f:
             samples = pkl.load(f)
         for sample in samples:
+            is_jammed = len(sample.jammers) > 0
             for su_idx in sample.spectrograms:
-                min_val = min(min_val, np.min(sample.spectrograms[su_idx]))
-                max_val = max(max_val, np.max(sample.spectrograms[su_idx]))
+                values = sample.spectrograms[su_idx]
+                min_val = min(min_val, np.min(values))
+                max_val = max(max_val, np.max(values))
+                hist, _ = np.histogram(values.ravel(), bins=bin_edges)
+                hist_all += hist
+                if is_jammed:
+                    hist_jammed += hist
         del samples  # free memory
         p_bar.update(1)
 
     p_bar.close()
 
-    print(f"Min value: {min_val}, Max value: {max_val}")
-    return min_val, max_val
+    if min_val < assumed_value_range[0] or max_val > assumed_value_range[1]:
+        warnings.warn(
+            f"Spectrogram values ({min_val} to {max_val}) exceed the assumed "
+            f"histogram range {assumed_value_range} (ASSUMED_VALUE_RANGE_DB). "
+            "Values outside this range were excluded from the percentile "
+            "estimate, which may bias the resulting clip bounds. Consider "
+            "widening ASSUMED_VALUE_RANGE_DB."
+        )
+
+    clip_min = _weighted_percentile(bin_edges, hist_all, low_percentile)
+    clip_max = _weighted_percentile(bin_edges, hist_jammed, high_percentile_jammed)
+
+    print(f"Value range: {min_val} to {max_val}")
+    print(f"Clip min (p{low_percentile} of all values): {clip_min}")
+    print(f"Clip max (p{high_percentile_jammed} of jammed values): {clip_max}")
+
+    return clip_min, clip_max
 
 
-def flatten_snr_sjr_dicts(labels):
-    """Converts the snr_by_su and sjr_by_su nested dicts into separate list columns.
+def flatten_per_su_dicts(labels):
+    """Converts the per SU nested dicts into separate list columns.
 
     Transforms nested dicts like {"su_0": [val, val], "su_1": [val, val]} into
     separate keys like "snr_by_su_su_0", "snr_by_su_su_1", etc., enabling
-    conversion to CSV format.
+    conversion to CSV format. This is done for all metrics listed in
+    PER_SU_METRICS.
 
     Parameters
     ----------
     labels : dict
-        Dictionary containing labels with "snr_by_su" and "sjr_by_su" as nested dicts.
+        Dictionary containing labels with the per SU metrics as nested dicts.
 
     Returns
     -------
     labels : dict
-        Dictionary with flattened SNR/SJR columns and original dicts removed.
+        Dictionary with flattened per SU columns and original dicts removed.
     """
 
-    # Flatten snr_by_su
-    if "snr_by_su" in labels:
-        snr_by_su_dict = labels.pop("snr_by_su")
-        for su_key, su_values in snr_by_su_dict.items():
-            labels[f"snr_by_su_{su_key}"] = su_values
-
-    # Flatten sjr_by_su
-    if "sjr_by_su" in labels:
-        sjr_by_su_dict = labels.pop("sjr_by_su")
-        for su_key, su_values in sjr_by_su_dict.items():
-            labels[f"sjr_by_su_{su_key}"] = su_values
+    for metric_name in PER_SU_METRICS:
+        if metric_name in labels:
+            metric_dict = labels.pop(metric_name)
+            for su_key, su_values in metric_dict.items():
+                labels[f"{metric_name}_{su_key}"] = su_values
 
     return labels
 
@@ -113,8 +224,8 @@ def samples_to_imgs_and_labels(
     filename,
     total_sample_idx,
     labels,
-    min_val,
-    max_val,
+    clip_min,
+    clip_max,
     binary_resource_img=True,
 ):
     """Creates images for easier processing of the dataset from the custom data format.
@@ -132,10 +243,10 @@ def samples_to_imgs_and_labels(
     labels : dict
         Dictionary containing the labels (jammer type and number
         of legitimate transmitters).
-    min_val : float
-        Minimum value found in the spectrograms (for consistent scaling).
-    max_val : float
-        Maximum value found in the spectrograms (for consistent scaling).
+    clip_min : float
+        Lower clipping bound applied before scaling to 8-bit (for consistent scaling).
+    clip_max : float
+        Upper clipping bound applied before scaling to 8-bit (for consistent scaling).
     binary_resource_img : bool
         If True, the resource allocation image will be binary.
             If False, the resource allocation image will contain the corresponding
@@ -176,17 +287,17 @@ def samples_to_imgs_and_labels(
             labels["jammer_power"].append(np.nan)
             labels["jammer_location"].append(np.nan)
         labels["num_legitimate_transmitters"].append(len(sample.transmitters))
+        labels["jammer_occupancy"].append(getattr(sample, "jammer_occupancy", np.nan))
 
-        # Collect SNR and SJR data for each SU
-        for su_idx in sample.snr_by_su:
-            if su_idx not in labels["snr_by_su"]:
-                labels["snr_by_su"][su_idx] = []
-            labels["snr_by_su"][su_idx].append(sample.snr_by_su[su_idx])
-
-        for su_idx in sample.sjr_by_su:
-            if su_idx not in labels["sjr_by_su"]:
-                labels["sjr_by_su"][su_idx] = []
-            labels["sjr_by_su"][su_idx].append(sample.sjr_by_su[su_idx])
+        # Collect the per SU metrics. The SU indexes are taken from the
+        # spectrograms, so that a metric that is missing for a sample results in
+        # NaN instead of in columns of inconsistent length.
+        for metric_name in PER_SU_METRICS:
+            metric_by_su = getattr(sample, metric_name, {})
+            for su_idx in sample.spectrograms:
+                if su_idx not in labels[metric_name]:
+                    labels[metric_name][su_idx] = []
+                labels[metric_name][su_idx].append(metric_by_su.get(su_idx, np.nan))
 
         # get total allocated resources (for all legitimate TX) and save as image
         total_allocated_resources = get_total_allocated_resources(
@@ -204,9 +315,11 @@ def samples_to_imgs_and_labels(
         # save the spectrograms as image
         for su_idx in sample.spectrograms:
             su_spectrogram = sample.spectrograms[su_idx]
-            # conversion to the expected range and type for PNG output
+            # clip first to avoid over-/underflow when casting to uint8, then
+            # scale the clipped range to the 8-bit range for PNG output
+            su_spectrogram = np.clip(su_spectrogram, clip_min, clip_max)
             su_spectrogram = (
-                (su_spectrogram - min_val) / (max_val - min_val) * 255
+                (su_spectrogram - clip_min) / (clip_max - clip_min) * 255
             ).astype(np.uint8)
             spectrogram_img = Image.fromarray(su_spectrogram)
             spectrogram_img.save(
@@ -281,9 +394,9 @@ if __name__ == "__main__":
         "jammer_power": [],
         "jammer_location": [],
         "num_legitimate_transmitters": [],
-        "snr_by_su": {},
-        "sjr_by_su": {},
+        "jammer_occupancy": [],
     }
+    labels.update({metric_name: {} for metric_name in PER_SU_METRICS})
 
     custom_files_dir = os.path.join(_datapath, f"{dataset_nr}", "custom")
     filenames = glob(
@@ -302,10 +415,14 @@ if __name__ == "__main__":
     else:
         os.makedirs(target_path)
 
-    min_val, max_val = find_min_max_values(filenames)
+    clip_min, clip_max = compute_clipping_values(filenames)
 
-    # save the minimum and maximum values, so that original values can be restored
-    pd.DataFrame({"min_val": [min_val], "max_val": [max_val]}).to_csv(
+    # Save the clipping bounds (columns are still named min_val/max_val for
+    # backwards compatibility with existing readers of this file, e.g.
+    # `load_dataset` in `src/utils/data_utils.py`) so that the clipped/rescaled
+    # values can be restored. See the README for details on how these bounds
+    # are derived.
+    pd.DataFrame({"min_val": [clip_min], "max_val": [clip_max]}).to_csv(
         os.path.join(_datapath, f"{dataset_nr}", "spectrogram_min_max.csv"),
         index=False,
     )
@@ -318,13 +435,26 @@ if __name__ == "__main__":
             filename,
             total_sample_idx,
             labels,
-            min_val,
-            max_val,
+            clip_min,
+            clip_max,
             binary_resource_img=args.binary_resource_img,
         )
 
-    # Flatten nested SNR and SJR dicts into separate columns
-    labels = flatten_snr_sjr_dicts(labels)
+    # Flatten the nested per SU dicts into separate columns
+    labels = flatten_per_su_dicts(labels)
+
+    # Assign reproducible train/valid/test splits for the supervised and
+    # unsupervised protocols (see README for details).
+    split_supervised, split_unsupervised = generate_dataset_splits(
+        np.asarray(labels["jammer_type"]),
+        train_frac=cfg.split.train_frac,
+        test_frac=cfg.split.test_frac,
+        valid_frac=cfg.split.valid_frac,
+        left_out_types=tuple(cfg.split.left_out_types),
+        seed=cfg.split.seed,
+    )
+    labels["split_supervised"] = split_supervised
+    labels["split_unsupervised"] = split_unsupervised
 
     pd.DataFrame(labels).to_csv(
         os.path.join(_datapath, f"{dataset_nr}", "labels.csv"),

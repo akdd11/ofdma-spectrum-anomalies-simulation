@@ -393,85 +393,101 @@ def load_dataset(
         return labels_df, pt_spectrograms
 
 
-def generate_splitting_idxs(
-    labels, num_train, num_valid, num_test, anomaly_probability_test
+def generate_dataset_splits(
+    jammer_types,
+    train_frac,
+    test_frac,
+    valid_frac,
+    left_out_types=("random_hop",),
+    seed=42,
 ):
-    """Generate indices for splitting the dataset into training,
-    validation and test set.
+    """Generate reproducible train/valid/test split columns for the dataset.
 
-    There are only normal samples in the training and validation set,
-    since the splitting is intended for unsupervised learning.
+    A single stratified split (by jammer type, including `"no jammer"`) is
+    computed once per class and then reused for both the supervised and the
+    unsupervised protocol, so that the two protocols share an identical test
+    set while unsupervised training only ever sees normal samples and
+    `left_out_types` (e.g. `random_hop`) are held out of training/validation
+    entirely for out-of-distribution generalization testing. See the "Data
+    Splits" section in the README for the full rationale.
 
     Parameters
     ----------
-    labels : np.array
-        The labels of the dataset.
-    num_train : int
-        The number of samples in the training set (only normal samples).
-    num_valid : int
-        The number of samples in the validation set (only normal samples).
-    num_test : int
-        The number of samples in the test set (normal and anomaly samples).
-    anomaly_probability_test : float
-        The probability of an anomaly in the test set.
+    jammer_types : np.array
+        The jammer type label (e.g. "no jammer", "barrage", ...) of each
+        sample, in the order the split columns should be returned in.
+    train_frac : float
+        Fraction of each class assigned to the training split.
+    test_frac : float
+        Fraction of each class assigned to the (shared) test split.
+    valid_frac : float
+        Fraction of each class assigned to the validation split.
+        `train_frac + test_frac + valid_frac` must sum to 1.
+    left_out_types : tuple of str
+        Jammer types that are only ever assigned to the test split (for
+        supervised learning), so that they can be used to evaluate
+        generalization to jammer types unseen during training. They are
+        never assigned to train/valid in either split. Default: `("random_hop",)`.
+    seed : int
+        Seed for the random number generator used to shuffle samples within
+        each class before slicing. Default: 42.
 
     Returns
     -------
-    train_idxs : np.array
-        The indices of the training set.
-    valid_idxs : np.array
-        The indices of the validation set.
-    test_idxs : np.array
-        The indices of the test set.
+    split_supervised : np.array
+        Split assignment for each sample for the supervised protocol.
+        Values are `"train"`, `"valid"`, `"test"`, or `None` (unused).
+    split_unsupervised : np.array
+        Split assignment for each sample for the unsupervised protocol.
+        Values are `"train"`, `"valid"`, `"test"`, or `None` (unused).
     """
 
-    if num_train + num_valid + num_test > len(labels):
+    if not np.isclose(train_frac + test_frac + valid_frac, 1.0):
         raise ValueError(
-            "The number of samples in the splits exceeds the number"
-            " of samples in the dataset."
+            "train_frac, test_frac and valid_frac must sum to 1, got"
+            f" {train_frac} + {test_frac} + {valid_frac} ="
+            f" {train_frac + test_frac + valid_frac}."
         )
 
-    if (
-        num_train + num_valid + num_test * anomaly_probability_test
-        > (labels == "no jammer").sum()
-    ):
-        raise ValueError(
-            "The number of normal samples in the splits exceeds the"
-            " number of normal samples in the dataset."
-        )
+    jammer_types = np.asarray(jammer_types)
+    random_generator = np.random.default_rng(seed=seed)
 
-    random_generator = np.random.default_rng(seed=42)
+    split_supervised = np.full(len(jammer_types), None, dtype=object)
+    split_unsupervised = np.full(len(jammer_types), None, dtype=object)
 
-    jammer_idxs_by_type = {}
-    for jammer_type in np.unique(labels):
-        jammer_idxs_by_type[jammer_type] = np.where(labels == jammer_type)[0]
-        random_generator.shuffle(jammer_idxs_by_type[jammer_type])
+    for jammer_type in np.unique(jammer_types):
+        class_idxs = np.where(jammer_types == jammer_type)[0]
+        random_generator.shuffle(class_idxs)
+        n_class = len(class_idxs)
 
-    train_idxs = jammer_idxs_by_type["no jammer"][:num_train]
-    valid_idxs = jammer_idxs_by_type["no jammer"][num_train : num_train + num_valid]
+        n_test = round(test_frac * n_class)
+        n_train = round(train_frac * n_class)
+        n_valid = n_class - n_test - n_train
+        if n_valid < 0:
+            raise ValueError(
+                f"Not enough samples of type '{jammer_type}' ({n_class}) to"
+                f" satisfy train_frac={train_frac} and test_frac={test_frac}."
+            )
 
-    num_anomalies = int(num_test * anomaly_probability_test)
-    num_anomalies_by_type = num_anomalies // (len(jammer_idxs_by_type) - 1)
-    # number of anomalies for each jammer type, normal samples are not considered
-    num_normals_test = num_test - num_anomalies
+        test_idxs = class_idxs[:n_test]
+        train_idxs = class_idxs[n_test : n_test + n_train]
+        valid_idxs = class_idxs[n_test + n_train : n_test + n_train + n_valid]
 
-    test_idxs = jammer_idxs_by_type["no jammer"][
-        num_train + num_valid : num_train + num_valid + num_normals_test
-    ]
-    if len(test_idxs) < num_normals_test:
-        raise ValueError(
-            "Not enough normal samples for the test set. "
-            "Please adjust the number of samples in the splits."
-        )
+        # test split is shared identically between both protocols
+        split_supervised[test_idxs] = "test"
+        split_unsupervised[test_idxs] = "test"
 
-    for jammer_type in jammer_idxs_by_type:
+        # unsupervised train/valid: normal samples only
         if jammer_type == "no jammer":
-            continue
-        test_idxs = np.concatenate(
-            (test_idxs, jammer_idxs_by_type[jammer_type][:num_anomalies_by_type])
-        )
+            split_unsupervised[train_idxs] = "train"
+            split_unsupervised[valid_idxs] = "valid"
 
-    return train_idxs, valid_idxs, test_idxs
+        # supervised train/valid: all classes except left_out_types
+        if jammer_type not in left_out_types:
+            split_supervised[train_idxs] = "train"
+            split_supervised[valid_idxs] = "valid"
+
+    return split_supervised, split_unsupervised
 
 
 def downsample_spectrograms(
@@ -538,24 +554,6 @@ if __name__ == "__main__":
 
     datapath = get_datapath()
     labels_df = pd.read_csv(os.path.join(datapath, str(dataset_idx), "labels.csv"))
-
-    # num_samples_total = labels_df.shape[0]
-
-    # num_train = int(num_samples_total * 0.6)
-    # num_val = int(num_samples_total * 0.0)
-    # num_test = int(num_samples_total * 0.2)
-
-    # anomaly_probability = 0.5
-
-    # train_idxs, valid_idxs, test_idxs = generate_splitting_idxs(
-    #     labels_df["jammer_type"].to_numpy(),
-    #     num_train,
-    #     num_val,
-    #     num_test,
-    #     anomaly_probability,
-    # )
-
-    # labels_test = labels_df["jammer_type"].to_numpy()[test_idxs]
 
     load_one_sample_from_images(
         os.path.join(datapath, str(dataset_idx), "images"), "PT", 0, "none"

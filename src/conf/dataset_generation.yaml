@@ -1,9 +1,9 @@
-nr_samples: 2000  # Number of samples to generate
+nr_samples: 20  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 0     # Dataset number
+dataset_nr: 10     # Dataset number
 
 f_c: 3.75e9       # Carrier frequency in Hz
 
@@ -49,3 +49,12 @@ plots:
   scenario_rendered: False
 
 logging: False
+
+# Train/valid/test split assignment written to labels.csv (see README for
+# details). Applied identically per jammer type; must sum to 1.
+split:
+  train_frac: 0.65
+  test_frac: 0.25
+  valid_frac: 0.10
+  left_out_types: ["random_hop"]  # only assigned to test, never train/valid (OOD generalization eval)
+  seed: 42

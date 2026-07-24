@@ -41,8 +41,8 @@ The generated data is stored in the directory that is specified in the file `dat
 
 ### Create image data and labels
 
-To further utilize the data, the script `src/create_image_data_and_labels.py` can be executed, which creates spectrogram images and labels from the custom intermediate data. The dataset number can be configured via the command line, run `python src/create_image_data_and_labels.py -d <dataset_number>` to specify it. The generated spectrograms are stored in the same directory as the custom intermediate data in the subdirectory `images`. Two types of images are generated:
-* Spectrograms per sensing unit (SU): The images are normalized spectrograms and the filename format is `spectrogram-{sample_idx}-{su_idx}.png`. The spectrograms are normalized over the entire dataset, so the same minimum and maximum values are used for all spectrograms. This allows for a consistent representation of the spectrograms across different samples and sensing units. The minimum and maximum values are contained in the file `spectrogram_min_max.csv`, which is stored in the root of the dataset folder.
+To further utilize the data, the script `src/custom_data_to_img.py` can be executed, which creates spectrogram images and labels from the custom intermediate data. The dataset number can be configured via the command line, run `python src/custom_data_to_img.py -d <dataset_number>` to specify it. The generated spectrograms are stored in the same directory as the custom intermediate data in the subdirectory `images`. Two types of images are generated:
+* Spectrograms per sensing unit (SU): The images are normalized spectrograms and the filename format is `spectrogram-{sample_idx}-{su_idx}.png`. The spectrograms are normalized over the entire dataset, so the same value range is used for all spectrograms, allowing for a consistent representation across different samples and sensing units. Rather than using the raw dataset-wide minimum/maximum, the spectrograms are first **clipped** to a percentile-based range before being scaled to 8 bit: the lower bound is the 0.1st percentile of all spectrogram values (jammed and non-jammed), and the upper bound is the 99.99th percentile of spectrogram values from jammed samples only. This is because the raw min/max are dominated by a handful of extreme outlier values, which otherwise waste most of the 256 available grey levels on a value range that almost no pixel occupies; clipping the lower tail (dominated by noise floor, carrying no information) and the upper tail conservatively (only over jammed samples, so jammer power - the anomaly-relevant signal - is not clipped away) recovers close to 3x the effective resolution. The clipping bounds are computed per dataset from its own sample data (so they adapt automatically if the dataset is regenerated with different parameters), and are contained in the file `spectrogram_min_max.csv` (columns `min_val`/`max_val`, kept for backwards compatibility), which is stored in the root of the dataset folder. See `notebooks/analyze_clipping_percentiles.ipynb` for the analysis behind this choice.
 * Resource allocation images: Those images contain the resource allocation of the transmitters. They are 8-bit PNG images, in which 0 corresponds to not allocated and any other value corresponds to the allocated transmitter index. The filename format is `alloc_res-{sample_idx}.png`. 
 
 In addition, in the same directory, a file named `labels.csv` is created, which contains the following labels for each sample:
@@ -52,6 +52,45 @@ In addition, in the same directory, a file named `labels.csv` is created, which 
 * `num_legitimate_transmitters`: Number of legitimate transmitters in the scene
 * `snr_by_su_<su_idx>`: Signal-to-noise ratio (SNR) at each sensing unit (SU) in dB
 * `sjr_by_su_<su_idx>`: Signal-to-jammer ratio (SJR) at each sensing unit (SU) in dB
+* `jammer_occupancy`: Fraction of the resource elements of the time-frequency grid that are occupied by the jammer (NaN if there is no jammer)
+* `jsnr_local_by_su_<su_idx>`: Local jammer-to-signal-plus-noise ratio (JSNR) at each SU in dB (NaN if there is no jammer)
+* `db_contrast_global_by_su_<su_idx>`: Global dB contrast at each SU (NaN if there is no jammer)
+* `db_contrast_local_by_su_<su_idx>`: Local dB contrast at each SU (NaN if there is no jammer)
+* `split_supervised`: Train/valid/test assignment for the supervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See "Data Splits" below.
+* `split_unsupervised`: Train/valid/test assignment for the unsupervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See "Data Splits" below.
+
+#### Data Splits
+
+`split_supervised` and `split_unsupervised` are computed once at generation time (`generate_dataset_splits` in `src/utils/data_utils.py`) so that the benchmark's train/valid/test assignment is a fixed, reproducible property of the released dataset rather than something recomputed per experiment. The split is stratified: within each jammer type (including `"no jammer"`), samples are shuffled with a fixed seed and cut into `train_frac`/`test_frac`/`valid_frac` fractions, configurable in `src/conf/dataset_generation.yaml` under `split:` (default 65%/25%/10%).
+
+* **The test set is identical between the two columns** — the same samples are held out for both protocols, so results are directly comparable.
+* **Unsupervised training only ever uses `"no jammer"` samples**: `split_unsupervised` is `"train"`/`"valid"` only for normal samples; every other jammer type is only ever `"test"` or unused there, since this consumes the entire remaining pool of normal samples.
+* **Supervised training uses all jammer types except those in `left_out_types`** (default `["random_hop"]`), which is only ever assigned `"test"` (at the same per-class fraction as every other type) and never `"train"`/`"valid"`. This is used to evaluate generalization to a jammer type unseen during training; see the paper for details.
+* Rows with an empty split value are not part of either protocol's train/valid/test set for that column (this only occurs for `left_out_types` in `split_supervised`, since the fractions are otherwise applied to every sample of every class).
+
+#### Jammer impact metrics
+
+The SNR and the SJR are averaged over the whole time-frequency grid. This is a meaningful measure of difficulty when the anomaly score of a detector is pooled by averaging over the spectrogram as well, because a sparse jammer is then diluted in the same way. However, a jammer that only occupies a small part of the grid, such as the pilot jammer, can leave a strong trace on the few resource elements it actually affects while its grid-wide average power stays low. The following metrics are provided in addition, in order to describe this local impact.
+
+The jammer occupancy $\rho$ is the fraction of resource elements that are occupied by the jammer. It is the quantity that relates the grid-wide averages to the local ones, since approximately
+
+$$\mathrm{SJR}_\mathrm{global} \approx \mathrm{SJR}_\mathrm{local} - 10 \log_{10}(\rho).$$
+
+It only depends on the jammer and is therefore identical for all SUs. The occupancy differs by orders of magnitude between the jammer types, which is why the grid-wide SJR alone is not directly comparable across them.
+
+The local JSNR compares the jammer to everything else it competes with, evaluated only on the resource elements the jammer occupies,
+
+$$\mathrm{JSNR}_\mathrm{local} = 10 \log_{10} \frac{\overline{|J|^2}}{\overline{|S|^2} + \overline{|N|^2}},$$
+
+where $S$, $J$ and $N$ denote the signal, jammer and noise contribution to the spectrogram and the averages of $S$ and $J$ are taken over the occupied resource elements. Signal and noise are combined, because a detector operating on the spectrogram cannot separate them, they both act as background. Positive values indicate that the jammer dominates its own footprint.
+
+The dB contrast measures the change of the spectrogram caused by the jammer directly in the logarithmic domain the spectrogram images are provided in,
+
+$$\Delta = 20 \log_{10}|S + J + N| - 20 \log_{10}|S + N|.$$
+
+Since the spectrograms are normalized with dataset-wide minimum and maximum values, a contrast of $\Delta$ corresponds to the same number of grey levels in every image, so this metric is expressed in the units a detector actually operates on. Two variants are provided: `db_contrast_global` is the mean of $\Delta$ over all resource elements and thereby corresponds to a mean pooled anomaly score, whereas `db_contrast_local` is the mean over the occupied resource elements only and describes how much the affected part of the spectrogram is lifted.
+
+**NOTE**: The occupancy refers to the resource elements the jammer signal is generated on. For the pilot jammer, the out-of-band suppression is applied to the bounding frequency range only (see `filter_spectrogram_by_allocated_res`), so the visible footprint in the spectrogram is somewhat wider than the occupancy suggests, and the local metrics describe the strongly affected resource elements.
 
 
 ### Load the data

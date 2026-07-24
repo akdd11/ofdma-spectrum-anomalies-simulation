@@ -1,2 +1,3 @@
 # The second line of this file is used as path to the datasets folder.
-path/to/data-directory
+#C:\Data_C\Datasets\ofdma-spectrum-anomalies-simulation
+D:\GPUAccess\Anton\ofdma-spectrum-anomalies-simulation

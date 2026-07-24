@@ -583,7 +583,10 @@ def create_spectrograms(sample, cfg, h, noise=False):
     Returns
     -------
     sample : Sample
-        Updated sample object with spectrograms added.
+        Updated sample object with spectrograms added. In addition, the SNR and
+        SJR per SU, as well as the jammer occupancy, the local JSNR and the dB
+        contrast are stored in the sample. See the Sample class for details on
+        those metrics.
     """
 
     # create the plain user signals, first in time domain
@@ -727,6 +730,10 @@ def create_spectrograms(sample, cfg, h, noise=False):
 
         signal_power = np.mean(np.sum(np.abs(total_spec) ** 2, axis=0))
 
+        # keep the jammer and noise free spectrogram, it is required to quantify
+        # the impact of the jammer on the spectrogram further below
+        signal_spec = total_spec.copy()
+
         # add the jammer to the signal
         if len(sample.jammers) == 1:
 
@@ -736,6 +743,11 @@ def create_spectrograms(sample, cfg, h, noise=False):
                 jammer_resources_upsampled = upsample_axis_of_2d_array(
                     jammer_allocated_res, user_signal_spec.shape[1], axis=1
                 )
+
+                # the resource elements occupied by the jammer are identical for
+                # all SUs, hence the occupancy is a sample level quantity
+                jammer_mask = jammer_resources_upsampled.astype(bool)
+                sample.jammer_occupancy = float(np.mean(jammer_mask))
 
             # assuming the channel of the jammer is the last one in the axis of the transmitters
             cir = h_to_cir(h, su_idx, -1)
@@ -792,6 +804,43 @@ def create_spectrograms(sample, cfg, h, noise=False):
             sample.snr_by_su[su_idx] = 10 * np.log10(signal_power / noise_power)
 
             total_spec += noise_spec
+
+        # metrics describing how strongly the jammer stands out. In contrast to
+        # the SJR above, they are not diluted by a jammer that only occupies a
+        # small part of the time-frequency grid. They require both a jammer and
+        # noise to be present, otherwise they are not defined.
+        if len(sample.jammers) == 1 and noise:
+
+            # noise power per resource element. It is estimated over the full
+            # grid, so that the estimate is not distorted by the particular
+            # noise realization on a potentially very small jammer footprint.
+            noise_power_per_re = np.mean(np.abs(noise_spec) ** 2)
+
+            # signal and jammer power per resource element, but restricted to
+            # the resource elements the jammer occupies
+            signal_power_local = np.mean(np.abs(signal_spec[jammer_mask]) ** 2)
+            jammer_power_local = np.mean(np.abs(jammer_spec[jammer_mask]) ** 2)
+
+            sample.jsnr_local_by_su[su_idx] = 10 * np.log10(
+                jammer_power_local / (signal_power_local + noise_power_per_re)
+            )
+
+            # change of the spectrogram caused by the jammer, evaluated in the
+            # logarithmic domain the spectrogram images are provided in. Single
+            # resource elements can be attenuated by destructive interference,
+            # which is intended and hence not clipped.
+            db_contrast = 20 * np.log10(
+                np.abs(total_spec) / np.abs(signal_spec + noise_spec)
+            )
+
+            sample.db_contrast_global_by_su[su_idx] = float(np.mean(db_contrast))
+            sample.db_contrast_local_by_su[su_idx] = float(
+                np.mean(db_contrast[jammer_mask])
+            )
+        else:
+            sample.jsnr_local_by_su[su_idx] = np.nan
+            sample.db_contrast_global_by_su[su_idx] = np.nan
+            sample.db_contrast_local_by_su[su_idx] = np.nan
 
         spec_dBm = 20 * np.log10(np.abs(total_spec))
 
