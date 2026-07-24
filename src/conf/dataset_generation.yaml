@@ -25,7 +25,7 @@ subcarriers_per_rb: 12      # Number of subcarriers per resource block
 slot_length: 1e-3           # Slot length in seconds
 n_slots: 5                  # Number of slots for monitoring
 symbols_per_slot: 14        # Number of symbols per slot
-bits_per_symbol: 2          # Number of bits per symbol for QAM modulation
+bits_per_symbol: [2, 4, 6]  # Possible numbers of bits per symbol for QAM modulation, randomly chosen per transmitter/deceptive jammer
 nfft: 2048                  # Number of FFT points
 cp_len: 144                 # Cyclic prefix length in samples
 pilot_slots: [2]            # Indexes of the pilot symbols for channel estimation

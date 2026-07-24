@@ -597,7 +597,7 @@ def create_spectrograms(sample, cfg, h, noise=False):
             sample.transmitters[tx_idx].resources,
             cfg.subcarriers_per_rb,
             cfg.symbols_per_slot,
-            cfg.bits_per_symbol,
+            np.random.choice(cfg.bits_per_symbol),
         )
         # convert the user signal to time domain
         user_signal_time = freq_signal_to_time_signal(

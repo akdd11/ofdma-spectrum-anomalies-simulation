@@ -13,72 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import interp1d
 import scipy.signal as scsig
+from sionna.phy.mapping import Mapper as ConstellationMapper
 import seaborn as sns
-
-# define constellations
-BPSK_SYMBOLS = [-1, 1]
-QPSK_SYMBOLS = [-1 - 1j, -1 + 1j, 1 - 1j, 1 + 1j]
-QAM16_SYMBOLS = [
-    -3 - 3j,
-    -3 - 1j,
-    -3 + 3j,
-    -3 + 1j,
-    -1 - 3j,
-    -1 - 1j,
-    -1 + 3j,
-    -1 + 1j,
-    3 - 3j,
-    3 - 1j,
-    3 + 3j,
-    3 + 1j,
-    1 - 3j,
-    1 - 1j,
-    1 + 3j,
-    1 + 1j,
-]
-
-
-def constellation_mapping(in_sig, m):
-    """Maps an array of bits to constellation symbols.
-
-    Parameters
-    ----------
-    in_sig : np.array
-        Input bits, i.e., a numpy array containing 0 and 1.
-    m : int
-        Number of bits per symbol.
-
-    Returns
-    -------
-    mapped_symbols : np.array
-        Mapped symbols.
-    """
-
-    if m == 1:
-        constellation = BPSK_SYMBOLS
-    elif m == 2:
-        constellation = QPSK_SYMBOLS
-    elif m == 4:
-        constellation = QAM16_SYMBOLS
-    else:
-        raise ValueError("Constellation not implemented.")
-
-    # normalize constellation diagram for uniform power
-    constellation = constellation / np.sqrt(np.mean(np.abs(constellation) ** 2))
-
-    mapped_symbols = np.zeros(np.ceil(len(in_sig) / m).astype(int), dtype=complex)
-
-    in_sig_str = "".join(in_sig.astype(str))
-
-    dec_sig = np.zeros_like(mapped_symbols, dtype=int)
-
-    for i in range(0, len(in_sig), m):
-        dec_sig[i // m] = int(in_sig_str[i : i + m], 2)
-
-    for i in range(len(dec_sig)):
-        mapped_symbols[i] = constellation[dec_sig[i]]
-
-    return mapped_symbols
 
 
 def allocate_resources(num_tx, num_rb, num_slots, plot_allocation=False):
@@ -240,7 +176,7 @@ def get_total_allocated_resources(
     """
     # find all allocated resource  blocks for filtering
     total_allocated_resources = np.zeros_like(
-        sample.transmitters[0].resources, dtype=np.int
+        sample.transmitters[0].resources, dtype=np.int8
     )
     for tx_id, tx in enumerate(sample.transmitters):
         total_allocated_resources = total_allocated_resources + tx.resources * (
@@ -288,7 +224,9 @@ def generate_user_signal_freq(
     n_bits = allocated_resources.sum() * sc_per_rb * sym_per_slot * bits_per_symbol
 
     bits_in = np.random.randint(0, 2, int(n_bits))
-    symbols = constellation_mapping(bits_in, bits_per_symbol)
+
+    mapper = ConstellationMapper("qam", bits_per_symbol)
+    symbols = mapper(bits_in)
 
     # distribute the symbols on the allocated resource elements
     allocated_resource_elements = upsample_rb_to_re(
@@ -497,7 +435,9 @@ def generate_deceptive_jammer_signal(
     )
 
     bits_in = np.random.randint(0, 2, int(n_bits))
-    symbols = constellation_mapping(bits_in, bits_per_symbols)
+
+    mapper = ConstellationMapper("qam", bits_per_symbols)
+    symbols = mapper(bits_in)
 
     # distribute the symbols on the allocated resource elements
     allocated_resource_elements = upsample_rb_to_re(
@@ -675,7 +615,7 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
             cfg.n_slots,
             cfg.subcarriers_per_rb,
             cfg.symbols_per_slot,
-            cfg.bits_per_symbol,
+            np.random.choice(cfg.bits_per_symbol),
         )
     elif jammer_type == "sweep":
         jammer_signal, add_cp = generate_sweep_jammer_signal(
