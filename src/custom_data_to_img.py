@@ -14,6 +14,7 @@ import sys
 import argparse
 import pickle as pkl
 from glob import glob
+import hydra
 import numpy as np
 import pandas as pd
 from PIL import Image
@@ -220,8 +221,14 @@ def samples_to_imgs_and_labels(
     return total_sample_idx, labels
 
 
-def parse_arguments():
+def parse_arguments(default_dataset_nr):
     """Parse command line arguments.
+
+    Parameters
+    ----------
+    default_dataset_nr : int
+        Default dataset number to use if not overridden via command line
+        (taken from the dataset_generation.yaml config file).
 
     Returns
     -------
@@ -236,7 +243,7 @@ def parse_arguments():
     parser.add_argument(
         "-d",
         "--dataset-number",
-        default=0,
+        default=default_dataset_nr,
         type=int,
         required=False,
         help="Dataset number to process.",
@@ -259,7 +266,11 @@ def parse_arguments():
 
 if __name__ == "__main__":
 
-    args = parse_arguments()
+    # load config file which contains the parameters into cfg object
+    hydra.initialize(version_base=None, config_path="conf")
+    cfg = hydra.compose(config_name="dataset_generation")
+
+    args = parse_arguments(cfg.dataset_nr)
 
     dataset_nr = int(args.dataset_number)
     print(f"Processing dataset number: {dataset_nr}")
