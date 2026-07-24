@@ -1,9 +1,9 @@
-nr_samples: 20  # Number of samples to generate
+nr_samples: 2000  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 10     # Dataset number
+dataset_nr: 0     # Dataset number
 
 f_c: 3.75e9       # Carrier frequency in Hz
 
