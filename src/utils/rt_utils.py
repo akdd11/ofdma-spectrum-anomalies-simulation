@@ -691,9 +691,13 @@ def create_spectrograms(sample, cfg, h, noise=False):
 
             # print(f"pathloss: {10*np.log10(np.sum(np.abs(cir)**2))} dB")
 
-            user_signal_time = scsig.convolve(
-                user_signals_time[tx_idx], cir, mode="same"
-            )
+            # causal convolution, truncated to the original length. mode="same"
+            # must not be used here: the CIR has nfft taps, so it would recenter
+            # the output by nfft // 2 samples and thereby shift the signal by
+            # about half an OFDM symbol against the STFT window grid.
+            user_signal_time = scsig.convolve(user_signals_time[tx_idx], cir)[
+                :signal_len
+            ]
             user_signal_spec = calc_complex_spectrogram(
                 user_signal_time,
                 cfg.nfft,
@@ -753,8 +757,8 @@ def create_spectrograms(sample, cfg, h, noise=False):
             cir = h_to_cir(h, su_idx, -1)
 
             jammer_signal_time_after_channel = scsig.convolve(
-                jammer_signal_time, cir, mode="same"
-            )
+                jammer_signal_time, cir
+            )[:signal_len]
 
             time_signal += jammer_signal_time_after_channel
             jammer_spec = calc_complex_spectrogram(
