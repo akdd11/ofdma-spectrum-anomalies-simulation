@@ -644,7 +644,7 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
     return jammer_signal, add_cp
 
 
-def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
+def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris", offset=0, num_cols=None):
     """Calculate the complex spectrogram of a signal.
 
     Parameters
@@ -657,6 +657,19 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
         Shift of the window per step.
     window : str
         Window function to use for the spectrogram.
+    offset : int
+        Sample index at which the first analysis window starts. Used to
+        model a SU's STFT timing offset against the OFDM symbol grid (see
+        hardware_impairments.md §4.3). Default: 0 (grid-synchronous, as
+        before).
+    num_cols : int, optional
+        Number of columns (analysis windows) to compute. If None, it is
+        derived from `len(sig)` and `offset` as before, i.e. as many
+        columns as fit. Explicitly fixing it (e.g. to a value below the
+        default) is what makes the offset applicable irrespective of its
+        actual per-SU value while keeping the image dimensions constant
+        across the dataset (see hardware_impairments.md, D7 / §4.3
+        implementation notes).
 
     Returns
     -------
@@ -667,12 +680,16 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
     win = scsig.windows.get_window(window, nfft)
     win = win / np.sqrt(np.mean(win))  # normalize window to have unit energy
 
-    spec = np.ones((nfft, np.ceil(len(sig) / hop).astype(int)), dtype=complex) * np.nan
+    if num_cols is None:
+        num_cols = np.ceil((len(sig) - offset) / hop).astype(int)
 
-    for idx in range(0, len(sig) - nfft, hop):
-        spec[:, idx // hop] = np.fft.fft(
-            sig[idx : idx + nfft] * win, n=nfft, norm="ortho"
-        )
+    spec = np.ones((nfft, num_cols), dtype=complex) * np.nan
+
+    for col in range(num_cols):
+        idx = offset + col * hop
+        if idx + nfft >= len(sig):
+            break
+        spec[:, col] = np.fft.fft(sig[idx : idx + nfft] * win, n=nfft, norm="ortho")
 
     if np.isnan(spec[0, -1]):
         # discard last column if it is not filled (if hop does not divide the signal length)

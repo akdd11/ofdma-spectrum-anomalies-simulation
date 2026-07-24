@@ -22,14 +22,14 @@ import sionna.rt as srt
 _repo_name = "ofdma-spectrum-anomalies-simulation"
 _module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
 
-from utils import rt_utils, ofdm_utils
+from utils import rt_utils, ofdm_utils, impairment_utils
 from utils.data_utils import get_datapath
 from utils.datatypes import Transmitter, Jammer, Sample
 
 _datapath = get_datapath(_repo_name)
 
 
-def generate_sample(cfg, scene, jammer_type):
+def generate_sample(cfg, scene, jammer_type, su_hardware):
     """Generate one sample (realization) for the dataset.
 
     Parameters
@@ -40,6 +40,9 @@ def generate_sample(cfg, scene, jammer_type):
         Scene object containing the environment.
     jammer_type : str
         The type of the jammer for the sample, e.g., "normal", "deceptive", "sweep", "barrage", or "pilot".
+    su_hardware : pd.DataFrame
+        Per-SU hardware impairment parameters, fixed for the whole dataset.
+        See `impairment_utils.generate_su_hardware_params`.
 
     Returns
     -------
@@ -179,7 +182,7 @@ def generate_sample(cfg, scene, jammer_type):
         rt_utils.plot_frequency_responses(fft_freq, h, len(sample.jammers))
 
     # use the assigned resources together with the assigned resources to create the spectrograms
-    sample = rt_utils.create_spectrograms(sample, cfg, h, noise=True)
+    sample = rt_utils.create_spectrograms(sample, cfg, h, su_hardware, noise=True)
 
     if cfg.plots.all_spectrograms:
         sample.plot_all_spectrograms()
@@ -187,7 +190,7 @@ def generate_sample(cfg, scene, jammer_type):
     return sample
 
 
-def generate_dataset(cfg, scene):
+def generate_dataset(cfg, scene, su_coordinates):
     """Generate a dataset for the given scene.
 
     The dataset consists of samples with different legitimate transmitter counts and jamming types.
@@ -199,6 +202,9 @@ def generate_dataset(cfg, scene):
         Configuration object containing the parameters for the dataset generation.
     scene : sionna.rt.Scene
         Scene object containing the environment.
+    su_coordinates : list
+        List of sensing unit coordinates, used only to determine the number
+        of SUs for drawing the per-SU hardware impairment parameters.
     """
 
     # generate which samples are jammed (incl. type) and which are normal
@@ -219,6 +225,16 @@ def generate_dataset(cfg, scene):
     if not os.path.exists(os.path.join(_datapath, f"{cfg.dataset_nr}", "custom")):
         os.makedirs(os.path.join(_datapath, f"{cfg.dataset_nr}", "custom"))
 
+    # hardware impairment parameters are a property of the SU, not of the
+    # sample (D2 in hardware_impairments.md): drawn once here, held fixed for
+    # the whole dataset, and persisted next to the other per-dataset metadata.
+    su_hardware = impairment_utils.generate_su_hardware_params(
+        len(su_coordinates), cfg
+    )
+    su_hardware.to_csv(
+        os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv")
+    )
+
     for idx_sample in trange(cfg.nr_samples, desc="Generating samples"):
 
         logging.debug(f"Sample {idx_sample} -----------------------")
@@ -227,7 +243,9 @@ def generate_dataset(cfg, scene):
             # very rarely, a ValueError occurs that needs to be caught and
             # is handled by simply trying to generate the sample again
             try:
-                samples.append(generate_sample(cfg, scene, sample_type[idx_sample]))
+                samples.append(
+                    generate_sample(cfg, scene, sample_type[idx_sample], su_hardware)
+                )
                 break
             except ValueError:
                 print("ValueError occured in sample generation - Regenerating sample.")
@@ -379,4 +397,4 @@ if __name__ == "__main__":
         cfg.idx_first_sc = idx_first_sc
         cfg.p_noise_dbm = p_noise_dbm
 
-    generate_dataset(cfg, scene)
+    generate_dataset(cfg, scene, su_coordinates)

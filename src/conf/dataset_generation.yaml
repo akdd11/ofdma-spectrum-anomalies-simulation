@@ -1,16 +1,16 @@
-nr_samples: 2000  # Number of samples to generate
+nr_samples: 20  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 0     # Dataset number
+dataset_nr: 10     # Dataset number
 
 f_c: 3.75e9       # Carrier frequency in Hz
 
 min_tx: 3             # Minimum number of regular transmitters
 max_tx: 10            # Maximum number of regular transmitters
 tx_power: 10          # Transmit power of regular transmitter in dBm
-oob_suppression: -20  # Out-of-band suppression in dB
+oob_suppression: 0  # Out-of-band suppression in dB
 
 jam_probability: 0.5        # Probability of a jammer being present in the scene
 jam_power:                  # Jammer transmit power in dBm
@@ -32,6 +32,37 @@ pilot_slots: [2]            # Indexes of the pilot symbols for channel estimatio
 
 su_noise_figure: 10         # Noise figure of the SU in dB
 additional_impairments: 15  # Additional impairments in dB to be added to the noise power to prevent overly optimistic SNR values
+
+# Hardware impairments (see hardware_impairments.md for the rationale behind
+# every parameter below). Hardware parameters are drawn once per SU with a
+# dedicated seed and held fixed for the whole dataset (persisted to
+# su_hardware.csv), never redrawn per sample.
+impairments:
+  enabled: False        # master switch; every sub-block below is also gated on this
+  su_hardware_seed: 1234  # dedicated seed for drawing per-SU hardware parameters
+
+  su_timing_offset:      # §4.3: residual STFT-window timing error after network sync
+    enabled: False        # SU is time-synchronized to the network to 5G-UE accuracy;
+                          # residual |tau| drawn uniformly in [0, max_timing_error_ns] per SU
+    max_timing_error_ns: 390   # 3GPP TS 38.133 Te for 15 kHz SCS (~12 samples at 30.72 MHz,
+                               # ~8% of the CP); stays inside the ISI-free CP -> magnitude negligible
+
+  su_lo_freq_offset:     # §4.4: SU LO frequency offset, common to all emitters at that SU
+    enabled: False
+    ppm_min: 0.5          # TCXO, not GPS-disciplined (assumed sync'd to network, so no coarser)
+    ppm_max: 2.0
+
+  rx_dc_offset:           # §4.1: RX DC offset (LO self-mixing + ADC offset)
+    enabled: False
+    offset_over_noise_db_min: 5    # relative to the per-SU noise floor
+    offset_over_noise_db_max: 20
+
+  rx_iq_imbalance:        # §4.2: RX IQ imbalance (gain/phase mismatch between I/Q paths)
+    enabled: False
+    gain_imbalance_db_min: 0.3    # raw (uncalibrated) end of the assumed range, see §3/§4.2
+    gain_imbalance_db_max: 0.8
+    phase_imbalance_deg_min: 2.0
+    phase_imbalance_deg_max: 5.0
 
 # Ray tracing parameters
 sionna:
