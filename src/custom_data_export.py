@@ -1,7 +1,13 @@
-"""This script converts custom dataset samples into images for further processing.
+"""This script converts custom dataset samples into a format suitable for further
+processing, either as one PNG file per spectrogram/resource-allocation grid, or
+as a single per-dataset HDF5 file. Select the format via `--output-format`
+(`png`, the default, or `hdf5`); see `samples_to_imgs_and_labels` and
+`samples_to_hdf5_and_labels` respectively. Both formats apply the same 8-bit
+quantization (see below) and produce identical values, just packaged
+differently on disk.
 
 Spectrograms are clipped to a percentile-based value range (see
-`compute_clipping_values`) before being scaled to 8-bit PNGs, so that the
+`compute_clipping_values`) before being scaled to 8 bit, so that the
 limited 8-bit resolution is not dominated by rare outlier values. In addition,
 it generates a labels file containing the jammer type, and the number of
 legitimate transmitters for each sample. Also, a metadata file containing the
@@ -18,6 +24,7 @@ import argparse
 import pickle as pkl
 import warnings
 from glob import glob
+import h5py
 import hydra
 import numpy as np
 import pandas as pd
@@ -145,7 +152,9 @@ def compute_clipping_values(
         Upper clipping bound.
     """
 
-    bin_edges = np.linspace(assumed_value_range[0], assumed_value_range[1], num_bins + 1)
+    bin_edges = np.linspace(
+        assumed_value_range[0], assumed_value_range[1], num_bins + 1
+    )
     hist_all = np.zeros(num_bins, dtype=np.int64)
     hist_jammed = np.zeros(num_bins, dtype=np.int64)
 
@@ -334,6 +343,153 @@ def samples_to_imgs_and_labels(
     return total_sample_idx, labels
 
 
+def samples_to_hdf5_and_labels(
+    h5_file,
+    data_path,
+    dataset_nr,
+    filename,
+    total_sample_idx,
+    labels,
+    clip_min,
+    clip_max,
+    binary_resource_img=True,
+):
+    """HDF5 counterpart of `samples_to_imgs_and_labels`.
+
+    Writes samples into a single, already-open HDF5 file instead of one PNG
+    file per spectrogram/resource-allocation grid. The file contains two
+    datasets, both quantized to 8 bit with the same clip-then-scale scheme
+    used for the PNGs:
+
+    - "spectrograms", shape (num_samples, num_su, num_freq_bins,
+      num_time_bins), dtype uint8.
+    - "resource_allocations", shape (num_samples, num_freq_bins,
+      num_time_bins), dtype uint8.
+
+    Both datasets are created lazily on the first sample seen (once the
+    per-sample shapes are known) and grown with `Dataset.resize` as samples
+    are appended, since the total sample count across all input files is not
+    known ahead of time. `su_idx` is used directly as the row index into the
+    SU axis, which relies on it being a contiguous 0-based index (see
+    `Sample.plot_all_spectrograms` in `src/utils/datatypes.py`, which makes
+    the same assumption).
+
+    Parameters
+    ----------
+    h5_file : h5py.File
+        Open, writable HDF5 file that the "spectrograms" and
+        "resource_allocations" datasets are created in (on the first call)
+        and appended to.
+    data_path : str
+        Path to the datasets folder.
+    dataset_nr : int
+        Dataset number.
+    filename : str
+        Filename of the samples in custom format (to process).
+    total_sample_idx : int
+        Index of the current sample.
+    labels : dict
+        Dictionary containing the labels (jammer type and number
+        of legitimate transmitters).
+    clip_min : float
+        Lower clipping bound applied before scaling to 8-bit (for consistent scaling).
+    clip_max : float
+        Upper clipping bound applied before scaling to 8-bit (for consistent scaling).
+    binary_resource_img : bool
+        If True, the resource allocation array will be binary.
+            If False, the resource allocation array will contain the corresponding
+            transmitter index (starting with 1) for allocated resources, and 0 for non-allocated.
+            Default: True.
+
+    Returns
+    -------
+    total_sample_idx : int
+        Updated index of the current sample.
+    labels : dict
+        Updated dictionary containing the labels, identical in structure to
+        the return value of `samples_to_imgs_and_labels`.
+    """
+
+    filename = os.path.join(
+        data_path,
+        f"{dataset_nr}",
+        "custom",
+        filename,
+    )
+
+    with open(filename, "rb") as f:
+        samples = pkl.load(f)
+
+    for sample in samples:
+        # get label (jammer type)
+        if len(sample.jammers) > 0:
+            labels["jammer_type"].append(sample.jammers[0].type)
+            labels["jammer_power"].append(sample.jammers[0].transmit_power)
+            labels["jammer_location"].append(sample.jammers[0].location)
+        else:
+            labels["jammer_type"].append("no jammer")
+            labels["jammer_power"].append(np.nan)
+            labels["jammer_location"].append(np.nan)
+        labels["num_legitimate_transmitters"].append(len(sample.transmitters))
+        labels["jammer_occupancy"].append(getattr(sample, "jammer_occupancy", np.nan))
+
+        # Collect the per SU metrics, same as in samples_to_imgs_and_labels.
+        for metric_name in PER_SU_METRICS:
+            metric_by_su = getattr(sample, metric_name, {})
+            for su_idx in sample.spectrograms:
+                if su_idx not in labels[metric_name]:
+                    labels[metric_name][su_idx] = []
+                labels[metric_name][su_idx].append(metric_by_su.get(su_idx, np.nan))
+
+        # get total allocated resources (for all legitimate TX)
+        total_allocated_resources = get_total_allocated_resources(
+            sample, 12, 14, binary_resource_img
+        ).astype(np.uint8)
+
+        if "resource_allocations" not in h5_file:
+            h5_file.create_dataset(
+                "resource_allocations",
+                shape=(1, *total_allocated_resources.shape),
+                maxshape=(None, *total_allocated_resources.shape),
+                chunks=(1, *total_allocated_resources.shape),
+                dtype=np.uint8,
+                compression="gzip",
+            )
+        resource_ds = h5_file["resource_allocations"]
+        if resource_ds.shape[0] <= total_sample_idx:
+            resource_ds.resize(total_sample_idx + 1, axis=0)
+        resource_ds[total_sample_idx] = total_allocated_resources
+
+        # clip first to avoid over-/underflow when casting to uint8, then
+        # scale the clipped range to the 8-bit range, same as for the PNGs
+        num_su = len(sample.spectrograms)
+        if "spectrograms" not in h5_file:
+            first_spectrogram = next(iter(sample.spectrograms.values()))
+            h5_file.create_dataset(
+                "spectrograms",
+                shape=(1, num_su, *first_spectrogram.shape),
+                maxshape=(None, num_su, *first_spectrogram.shape),
+                chunks=(1, num_su, *first_spectrogram.shape),
+                dtype=np.uint8,
+                compression="gzip",
+            )
+        spectrogram_ds = h5_file["spectrograms"]
+        if spectrogram_ds.shape[0] <= total_sample_idx:
+            spectrogram_ds.resize(total_sample_idx + 1, axis=0)
+
+        for su_idx in sample.spectrograms:
+            su_spectrogram = sample.spectrograms[su_idx]
+            su_spectrogram = np.clip(su_spectrogram, clip_min, clip_max)
+            su_spectrogram = (
+                (su_spectrogram - clip_min) / (clip_max - clip_min) * 255
+            ).astype(np.uint8)
+            spectrogram_ds[total_sample_idx, su_idx] = su_spectrogram
+
+        total_sample_idx += 1
+
+    return total_sample_idx, labels
+
+
 def parse_arguments(default_dataset_nr):
     """Parse command line arguments.
 
@@ -372,6 +528,20 @@ def parse_arguments(default_dataset_nr):
         " index (starting with 1) for allocated resources, and 0 for non-allocated.",
     )
 
+    parser.add_argument(
+        "-o",
+        "--output-format",
+        choices=["png", "hdf5"],
+        default="png",
+        required=False,
+        help="Output format for the spectrograms and resource allocations. 'png'"
+        " (default) writes one PNG file per spectrogram/resource-allocation grid"
+        " into the 'images' subdirectory, matching prior behavior. 'hdf5' writes"
+        " a single 'dataset.h5' file containing both as separate datasets"
+        " ('spectrograms', 'resource_allocations'), both uint8-quantized the same"
+        " way as the PNGs.",
+    )
+
     args = parser.parse_args()
 
     return args
@@ -406,14 +576,19 @@ if __name__ == "__main__":
         )
     )
 
-    target_path = os.path.join(_datapath, f"{dataset_nr}", "images")
+    if args.output_format == "png":
+        target_path = os.path.join(_datapath, f"{dataset_nr}", "images")
 
-    # create folder for images or clear files the folder
-    if os.path.exists(target_path):
-        for file in os.listdir(target_path):
-            os.remove(os.path.join(target_path, file))
-    else:
-        os.makedirs(target_path)
+        # create folder for images or clear files the folder
+        if os.path.exists(target_path):
+            for file in os.listdir(target_path):
+                os.remove(os.path.join(target_path, file))
+        else:
+            os.makedirs(target_path)
+    else:  # hdf5
+        dataset_dir = os.path.join(_datapath, f"{dataset_nr}")
+        os.makedirs(dataset_dir, exist_ok=True)
+        h5_path = os.path.join(dataset_dir, "dataset.h5")
 
     clip_min, clip_max = compute_clipping_values(filenames)
 
@@ -427,18 +602,37 @@ if __name__ == "__main__":
         index=False,
     )
 
-    for file_idx, filename in enumerate(tqdm(filenames)):
+    if args.output_format == "png":
+        for file_idx, filename in enumerate(tqdm(filenames)):
 
-        total_sample_idx, labels = samples_to_imgs_and_labels(
-            _datapath,
-            dataset_nr,
-            filename,
-            total_sample_idx,
-            labels,
-            clip_min,
-            clip_max,
-            binary_resource_img=args.binary_resource_img,
-        )
+            total_sample_idx, labels = samples_to_imgs_and_labels(
+                _datapath,
+                dataset_nr,
+                filename,
+                total_sample_idx,
+                labels,
+                clip_min,
+                clip_max,
+                binary_resource_img=args.binary_resource_img,
+            )
+    else:  # hdf5
+        # opened once and passed through so the "spectrograms" and
+        # "resource_allocations" datasets grow across all input files instead
+        # of being recreated per file
+        with h5py.File(h5_path, "w") as h5_file:
+            for file_idx, filename in enumerate(tqdm(filenames)):
+
+                total_sample_idx, labels = samples_to_hdf5_and_labels(
+                    h5_file,
+                    _datapath,
+                    dataset_nr,
+                    filename,
+                    total_sample_idx,
+                    labels,
+                    clip_min,
+                    clip_max,
+                    binary_resource_img=args.binary_resource_img,
+                )
 
     # Flatten the nested per SU dicts into separate columns
     labels = flatten_per_su_dicts(labels)
