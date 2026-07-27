@@ -24,8 +24,6 @@ from utils.ofdm_utils import (
     calc_complex_spectrogram,
     calc_spectrogram,
     crop_spectrogram_to_bandwidth,
-    upsample_rb_to_re,
-    filter_spectrogram_by_allocated_res,
     upsample_axis_of_2d_array,
 )
 from utils import impairment_utils
@@ -632,10 +630,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
             user_signal_time, cfg.tx_power
         )
 
-    # store allocated resources per transmitter, upsampled to match the
-    # number of time bins in the spectrogram
-    allocated_resources_upsampled = {}
-
     # if required, generate the jammer signal
     if len(sample.jammers) == 1:
         if sample.jammers[0].type == "pilot":
@@ -697,9 +691,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
 
         logging.debug(f"Creating spectrogram for SU{su_idx}.")
 
-        # initialize the empty time signal, either with zeros or with noise
-        time_signal = np.zeros(signal_len, dtype=complex)
-
         # per-SU hardware impairment parameters/derived quantities for this
         # sample. Fixed per SU (D2), only computed/applied if enabled.
         # Residual sub-CP timing error (5G-UE-grade sync, §4.3). It is bounded
@@ -726,84 +717,59 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
                 su_hardware.loc[su_idx, "iq_phase_imbalance_deg"],
             )
 
+        # --- legitimate signal -----------------------------------------------
+        # The SU antenna receives the sum of all transmitter signals as a
+        # single time-domain waveform; the spectrogram is computed once on that
+        # sum. The STFT is linear, so this is identical to the previous
+        # per-emitter spectrogram summation, while any per-emitter time-domain
+        # impairment still slots in before the sum.
+        signal_time = np.zeros(signal_len, dtype=complex)
         for tx_idx in range(len(sample.transmitters)):
 
-            # convert CFR to time domain and do convolution of signal with channel
+            # convert CFR to time domain and convolve the signal with the channel
             cir = h_to_cir(h, su_idx, tx_idx)
-
-            # print(f"pathloss: {10*np.log10(np.sum(np.abs(cir)**2))} dB")
 
             # causal convolution, truncated to the original length. mode="same"
             # must not be used here: the CIR has nfft taps, so it would recenter
             # the output by nfft // 2 samples and thereby shift the signal by
             # about half an OFDM symbol against the STFT window grid.
-            user_signal_time = scsig.convolve(user_signals_time[tx_idx], cir)[
-                :signal_len
-            ]
+            signal_time += scsig.convolve(user_signals_time[tx_idx], cir)[:signal_len]
 
-            if lo_offset_enabled:
-                user_signal_time = user_signal_time * su_lo_rotation
+        if lo_offset_enabled:
+            signal_time = signal_time * su_lo_rotation
 
-            user_signal_spec = calc_complex_spectrogram(
-                user_signal_time,
-                cfg.nfft,
-                cfg.nfft + cfg.cp_len,
-                offset=su_timing_offset,
-                num_cols=su_num_cols,
-            )
-            user_signal_spec = crop_spectrogram_to_bandwidth(
-                user_signal_spec, cfg.idx_first_sc, cfg.num_subcarriers
-            )
-
-            # when the SU is the first one, allocated resouces need to be
-            # upsampled to the actual number of time bins in the spectrogram
-            # this is used for filtering the user signals in time and frequency
-            if su_idx == 0:
-                allocated_resources = upsample_rb_to_re(
-                    sample.transmitters[tx_idx].resources,
-                    cfg.subcarriers_per_rb,
-                    cfg.symbols_per_slot,
-                )
-
-                allocated_resources_upsampled[tx_idx] = upsample_axis_of_2d_array(
-                    allocated_resources, user_signal_spec.shape[1], axis=1
-                )
-
-            user_signal_spec = filter_spectrogram_by_allocated_res(
-                user_signal_spec,
-                allocated_resources_upsampled[tx_idx],
-                cfg.oob_suppression,
-            )
-
-            if tx_idx == 0:
-                total_spec = user_signal_spec
-            else:
-                total_spec += user_signal_spec
+        signal_spec = calc_complex_spectrogram(
+            signal_time,
+            cfg.nfft,
+            cfg.nfft + cfg.cp_len,
+            offset=su_timing_offset,
+            num_cols=su_num_cols,
+        )
+        signal_spec = crop_spectrogram_to_bandwidth(
+            signal_spec, cfg.idx_first_sc, cfg.num_subcarriers
+        )
 
         if iq_imbalance_enabled:
-            total_spec = impairment_utils.apply_iq_imbalance(
-                total_spec, su_iq_alpha, su_iq_beta
+            signal_spec = impairment_utils.apply_iq_imbalance(
+                signal_spec, su_iq_alpha, su_iq_beta
             )
 
-        signal_power = np.mean(np.sum(np.abs(total_spec) ** 2, axis=0))
+        signal_power = np.mean(np.sum(np.abs(signal_spec) ** 2, axis=0))
 
-        # keep the jammer and noise free spectrogram, it is required to quantify
-        # the impact of the jammer on the spectrogram further below
-        signal_spec = total_spec.copy()
+        # total received spectrogram; jammer and noise are added on top.
+        # signal_spec is kept as the jammer- and noise-free reference required
+        # to quantify the impact of the jammer on the spectrogram further below.
+        total_spec = signal_spec.copy()
 
-        # add the jammer to the signal
+        # --- jammer ----------------------------------------------------------
         if len(sample.jammers) == 1:
 
             if su_idx == 0:
-                # get the filtering mask for the jammer signal
-                jammer_allocated_res = jammer_signal_freq != 0
-                jammer_resources_upsampled = upsample_axis_of_2d_array(
-                    jammer_allocated_res, user_signal_spec.shape[1], axis=1
-                )
-
                 # the resource elements occupied by the jammer are identical for
                 # all SUs, hence the occupancy is a sample level quantity
-                jammer_mask = jammer_resources_upsampled.astype(bool)
+                jammer_mask = upsample_axis_of_2d_array(
+                    jammer_signal_freq != 0, signal_spec.shape[1], axis=1
+                ).astype(bool)
                 sample.jammer_occupancy = float(np.mean(jammer_mask))
 
             # assuming the channel of the jammer is the last one in the axis of the transmitters
@@ -818,7 +784,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
                     jammer_signal_time_after_channel * su_lo_rotation
                 )
 
-            time_signal += jammer_signal_time_after_channel
             jammer_spec = calc_complex_spectrogram(
                 jammer_signal_time_after_channel,
                 cfg.nfft,
@@ -828,16 +793,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
             )
             jammer_spec = crop_spectrogram_to_bandwidth(
                 jammer_spec, cfg.idx_first_sc, cfg.num_subcarriers
-            )
-
-            # for a pilot jammer, only the bounding frequencies are used
-            # to achieve realistic filtering
-            bounding_freq_only = sample.jammers[0].type == "pilot"
-            jammer_spec = filter_spectrogram_by_allocated_res(
-                jammer_spec,
-                jammer_resources_upsampled,
-                cfg.oob_suppression,
-                bounding_freq_only,
             )
 
             if iq_imbalance_enabled:
@@ -855,8 +810,8 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         # add noise according to a specified SNR. The noise level relates to the weakest signal
         if noise:
             noise_signal = np.random.normal(
-                size=len(time_signal)
-            ) + 1j * np.random.normal(size=len(time_signal))
+                size=signal_len
+            ) + 1j * np.random.normal(size=signal_len)
             noise_signal = scale_time_signal_to_target_power(
                 noise_signal, cfg.p_noise_dbm
             )

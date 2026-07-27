@@ -39,6 +39,12 @@ Entry path for the simulation is the script `src/dataset_generation.py`, which e
 
 The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, in which the custom intermediate data is stored in a subdirectory named `custom`.
 
+### Hardware impairments
+
+Optional receiver-side hardware impairments (SU STFT timing offset, SU LO frequency offset, RX DC offset, RX IQ imbalance) can be enabled under the `impairments:` block in `src/conf/dataset_generation.yaml`. A master `impairments.enabled` switch gates all of them at once (for an ideal-vs-impaired ablation); each impairment also has its own `enabled` flag so individual impairments can be toggled independently. See `hardware_impairments.md` for the physical rationale, parameterization and literature references behind every impairment.
+
+Impairment parameters are properties of a sensing unit's hardware, not of a sample: they are drawn once per SU (seeded by `impairments.su_hardware_seed`) and held fixed for the whole dataset, rather than redrawn per sample. They are persisted to `su_hardware.csv` in the dataset folder (one row per SU), with columns `timing_offset_samples`, `lo_freq_offset_ppm`, `dc_offset_over_noise_db`, `dc_offset_phase_rad`, `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, and `iq_irr_db` (derived, informational only). The models are implemented in `src/utils/impairment_utils.py`.
+
 ### Create image data and labels
 
 To further utilize the data, the script `src/custom_data_to_img.py` can be executed, which creates spectrogram images and labels from the custom intermediate data. The dataset number can be configured via the command line, run `python src/custom_data_to_img.py -d <dataset_number>` to specify it. The generated spectrograms are stored in the same directory as the custom intermediate data in the subdirectory `images`. Two types of images are generated:
@@ -90,7 +96,7 @@ $$\Delta = 20 \log_{10}|S + J + N| - 20 \log_{10}|S + N|.$$
 
 Since the spectrograms are normalized with dataset-wide minimum and maximum values, a contrast of $\Delta$ corresponds to the same number of grey levels in every image, so this metric is expressed in the units a detector actually operates on. Two variants are provided: `db_contrast_global` is the mean of $\Delta$ over all resource elements and thereby corresponds to a mean pooled anomaly score, whereas `db_contrast_local` is the mean over the occupied resource elements only and describes how much the affected part of the spectrogram is lifted.
 
-**NOTE**: The occupancy refers to the resource elements the jammer signal is generated on. For the pilot jammer, the out-of-band suppression is applied to the bounding frequency range only (see `filter_spectrogram_by_allocated_res`), so the visible footprint in the spectrogram is somewhat wider than the occupancy suggests, and the local metrics describe the strongly affected resource elements.
+**NOTE**: The occupancy refers to the resource elements the jammer signal is generated on. Because of the finite analysis window, the visible footprint in the spectrogram can be somewhat wider than the occupancy suggests (most notably for the pilot jammer, whose energy sits on isolated subcarriers), and the local metrics describe the strongly affected resource elements.
 
 
 ### Load the data

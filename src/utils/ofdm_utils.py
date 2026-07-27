@@ -788,50 +788,6 @@ def crop_spectrogram_to_bandwidth(spec, idx_first_sc, num_sc):
     return spec[idx_first_sc : idx_first_sc + num_sc, :]
 
 
-def filter_spectrogram_by_allocated_res(
-    spec, total_allocated_resources, oob_suppression=-30, bounding_freq_only=False
-):
-    """Filter the spectrogram by the allocated resource elements.
-    Resource elements that are not allocated are set to zero.
-
-    Parameters
-    ----------
-    spec : np.ndarray
-        Spectrogram (in linear scale) to filter.
-    total_allocated_resources : np.ndarray
-        Array of allocated resources, where True indicates an allocated resource.
-    oob_suppression : float
-        Suppression level for out-of-band resource elements in dB.
-        Default: -30 dB.
-    bounding_freq_only : bool
-        If True, not per subcarrier is filtered, but the bounding box is applied.
-        This is required for  pilot jamming, where otherwise an extreme (and thereby unrealistic)
-        suppression of single subcarriers would be ACHIEVED.
-
-    Returns
-    -------
-    filtered_spec : np.ndarray
-        Filtered spectrogram.
-    """
-
-    oob_suppression_linear = 10 ** (oob_suppression / 10)
-
-    # create a mask which is True for the not allocated resource elements
-    # which shall be suppressed.
-    if bounding_freq_only:
-        start_idx = np.where(total_allocated_resources)[0].min()
-        end_idx = np.where(total_allocated_resources)[0].max() + 1
-        mask = np.ones_like(total_allocated_resources, dtype=bool)
-        mask[start_idx:end_idx] = False
-    else:
-        mask = ~total_allocated_resources.astype(bool)
-
-    # apply suppression
-    spec[mask] = spec[mask] * oob_suppression_linear
-
-    return spec
-
-
 def upsample_axis_of_2d_array(arr, new_dim, axis):
     """Upsample a 2D array along a specified axis using linear interpolation.
 
