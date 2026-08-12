@@ -7,6 +7,16 @@ __docformat__ = "numpy"
 
 import os
 
+import yaml
+
+# limit to one GPU (can be specified in the config file)
+_config_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "conf", "dataset_generation.yaml"
+)
+with open(_config_path, "r") as _f:
+    _gpu_id = yaml.safe_load(_f).get("gpu_id", 0)
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(_gpu_id))
+
 import argparse
 import pickle as pkl
 from datetime import datetime
@@ -228,12 +238,8 @@ def generate_dataset(cfg, scene, su_coordinates):
     # hardware impairment parameters are a property of the SU, not of the
     # sample (D2 in hardware_impairments.md): drawn once here, held fixed for
     # the whole dataset, and persisted next to the other per-dataset metadata.
-    su_hardware = impairment_utils.generate_su_hardware_params(
-        len(su_coordinates), cfg
-    )
-    su_hardware.to_csv(
-        os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv")
-    )
+    su_hardware = impairment_utils.generate_su_hardware_params(len(su_coordinates), cfg)
+    su_hardware.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv"))
 
     for idx_sample in trange(cfg.nr_samples, desc="Generating samples"):
 
