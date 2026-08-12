@@ -62,16 +62,16 @@ Both datasets are gzip-compressed and hold the exact same per-sample data as the
 **Using the HDF5 dataset in a PyTorch pipeline:** do not open the HDF5 file inside a `Dataset.__init__`. `DataLoader` with `num_workers > 0` creates its worker processes by forking (on Linux/Mac), and an `h5py.File` handle that is already open at that point gets inherited by every worker as a copy of the same underlying HDF5 state (read buffers, caches, locks) — since that state isn't safe to share across processes, concurrent reads through it can hang, crash, or silently return corrupted data. Store only the file path in `__init__` and open the file lazily on first use inside `__getitem__` (e.g. `if self.h5file is None: self.h5file = h5py.File(self.path, "r")`), so that each worker process opens and owns its own independent handle. This has no effect on `num_workers=0`, since there is only ever one process touching the file in that case.
 
 In addition, in the same directory, a file named `labels.csv` is created, which contains the following labels for each sample:
-* `jammer_type`: Type of the jammer (if there is no jammer, the value is "no jammer")
-* `jammer_power`: Transmit power of the jammer in dBm (if there is no jammer, the value is NaN)
-* `jammer_location`: Location of the jammer (if there is no jammer, the value is NaN)
-* `num_legitimate_transmitters`: Number of legitimate transmitters in the scene
-* `snr_by_su_<su_idx>`: Signal-to-noise ratio (SNR) at each sensing unit (SU) in dB
-* `sjr_by_su_<su_idx>`: Signal-to-jammer ratio (SJR) at each sensing unit (SU) in dB
-* `jammer_occupancy`: Fraction of the resource elements of the time-frequency grid that are occupied by the jammer (NaN if there is no jammer)
-* `jsnr_local_by_su_<su_idx>`: Local jammer-to-signal-plus-noise ratio (JSNR) at each SU in dB (NaN if there is no jammer)
-* `db_contrast_global_by_su_<su_idx>`: Global dB contrast at each SU (NaN if there is no jammer)
-* `db_contrast_local_by_su_<su_idx>`: Local dB contrast at each SU (NaN if there is no jammer)
+* `jammer_type`: Type of the jammer (if there is no jammer, the value is "no jammer").
+* `jammer_power`: Transmit power of the jammer in dBm (if there is no jammer, the value is NaN).
+* `jammer_location`: Location of the jammer (if there is no jammer, the value is NaN).
+* `num_legitimate_transmitters`: Number of legitimate transmitters in the scene.
+* `snr_by_su_<su_idx>`: Signal-to-noise ratio (SNR) at each sensing unit (SU) in dB.
+* `sjr_by_su_<su_idx>`: Signal-to-jammer ratio (SJR) at each sensing unit (SU) in dB (`inf` if there is no jammer, since the jammer power is then zero).
+* `jammer_occupancy`: Fraction of the resource elements of the time-frequency grid that are occupied by the jammer (NaN if there is no jammer). Identical for all SUs, since it only depends on the jammer signal.
+* `jsnr_local_by_su_<su_idx>`: Local jammer-to-signal-plus-noise ratio (JSNR) at each SU in dB (NaN if there is no jammer). Computed only over the jammer-occupied resource elements, as the ratio of mean jammer power to mean signal-plus-noise power there (noise power is estimated over the full grid to avoid distortion by a small footprint).
+* `db_contrast_global_by_su_<su_idx>`: Global dB contrast at each SU (NaN if there is no jammer). The mean, over all resource elements of the grid, of the per-pixel dB difference between the spectrogram with and without the jammer.
+* `db_contrast_local_by_su_<su_idx>`: Local dB contrast at each SU (NaN if there is no jammer). Same per-pixel dB difference as above, but averaged only over the jammer-occupied resource elements.
 * `split_supervised`: Train/valid/test assignment for the supervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See "Data Splits" below.
 * `split_unsupervised`: Train/valid/test assignment for the unsupervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See "Data Splits" below.
 
