@@ -1,16 +1,20 @@
-nr_samples: 20  # Number of samples to generate
+nr_samples: 40  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
+
+gpu_id: 0         # Index of the single GPU Sionna RT (Mitsuba/Dr.Jit) should run on;
+                  # set via CUDA_VISIBLE_DEVICES before any CUDA init to avoid touching
+                  # every visible GPU. Override with the CUDA_VISIBLE_DEVICES env var directly
+                  # if you need to pick a device before this file is even read.
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 10     # Dataset number
+dataset_nr: 2     # Dataset number
 
 f_c: 3.75e9       # Carrier frequency in Hz
 
 min_tx: 3             # Minimum number of regular transmitters
 max_tx: 10            # Maximum number of regular transmitters
 tx_power: 10          # Transmit power of regular transmitter in dBm
-oob_suppression: 0  # Out-of-band suppression in dB
 
 jam_probability: 0.5        # Probability of a jammer being present in the scene
 jam_power:                  # Jammer transmit power in dBm
@@ -38,31 +42,39 @@ additional_impairments: 15  # Additional impairments in dB to be added to the no
 # dedicated seed and held fixed for the whole dataset (persisted to
 # su_hardware.csv), never redrawn per sample.
 impairments:
-  enabled: False        # master switch; every sub-block below is also gated on this
+  enabled: True         # master switch; every sub-block below is also gated on this
   su_hardware_seed: 1234  # dedicated seed for drawing per-SU hardware parameters
 
   su_timing_offset:      # §4.3: residual STFT-window timing error after network sync
-    enabled: False        # SU is time-synchronized to the network to 5G-UE accuracy;
+    enabled: True         # SU is time-synchronized to the network to 5G-UE accuracy;
                           # residual |tau| drawn uniformly in [0, max_timing_error_ns] per SU
     max_timing_error_ns: 390   # 3GPP TS 38.133 Te for 15 kHz SCS (~12 samples at 30.72 MHz,
                                # ~8% of the CP); stays inside the ISI-free CP -> magnitude negligible
 
   su_lo_freq_offset:     # §4.4: SU LO frequency offset, common to all emitters at that SU
-    enabled: False
+    enabled: True
     ppm_min: 0.5          # TCXO, not GPS-disciplined (assumed sync'd to network, so no coarser)
     ppm_max: 2.0
 
   rx_dc_offset:           # §4.1: RX DC offset (LO self-mixing + ADC offset)
-    enabled: False
+    enabled: True
     offset_over_noise_db_min: 5    # relative to the per-SU noise floor
     offset_over_noise_db_max: 20
 
   rx_iq_imbalance:        # §4.2: RX IQ imbalance (gain/phase mismatch between I/Q paths)
-    enabled: False
-    gain_imbalance_db_min: 0.3    # raw (uncalibrated) end of the assumed range, see §3/§4.2
-    gain_imbalance_db_max: 0.8
-    phase_imbalance_deg_min: 2.0
-    phase_imbalance_deg_max: 5.0
+    enabled: True
+    # Calibrated monitoring receiver: post-digital-calibration IRR ~35-45 dB
+    # (see §3/§4.2 decision). This pushes the conjugate image to/below the noise
+    # floor, matching capture-based monitoring datasets (WASD, [R11]) whose front
+    # end is factory/digitally IQ-calibrated. The raw/uncalibrated end
+    # (gain 0.3-0.8 dB, phase 2-5 deg -> IRR ~24-30 dB) is retained in
+    # hardware_impairments.md as a degraded-hardware / domain-shift ablation, not
+    # the default, because at that end the legitimate-TX image becomes visible on
+    # strong-link SUs and can mask/imitate a real jammer.
+    gain_imbalance_db_min: 0.05
+    gain_imbalance_db_max: 0.2
+    phase_imbalance_deg_min: 0.5
+    phase_imbalance_deg_max: 1.5
 
 # Ray tracing parameters
 sionna:
@@ -82,10 +94,23 @@ plots:
 logging: False
 
 # Train/valid/test split assignment written to labels.csv (see README for
-# details). Applied identically per jammer type; must sum to 1.
+# details). Fixed sample counts per protocol, reproducing the split used for
+# the paper submission: for each class, samples are taken positionally in
+# generation order -- the first num_train_* go to train, the next
+# num_valid_* to valid, and the *last* num_test_* to test. Anomaly counts
+# are divided evenly across jammer types (train/valid only across types not
+# in left_out_types; test across every type, including left_out_types).
 split:
-  train_frac: 0.65
-  test_frac: 0.25
-  valid_frac: 0.10
   left_out_types: ["random_hop"]  # only assigned to test, never train/valid (OOD generalization eval)
-  seed: 42
+  supervised:
+    num_train_normal: 5900
+    num_valid_normal: 100
+    num_test_normal: 1000
+    num_train_anomaly: 5900
+    num_valid_anomaly: 100
+    num_test_anomaly: 2500
+  unsupervised:
+    num_train_normal: 8800
+    num_valid_normal: 200
+    num_test_normal: 1000
+    num_test_anomaly: 2500

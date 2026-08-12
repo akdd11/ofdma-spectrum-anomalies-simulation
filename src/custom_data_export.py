@@ -641,11 +641,9 @@ if __name__ == "__main__":
     # unsupervised protocols (see README for details).
     split_supervised, split_unsupervised = generate_dataset_splits(
         np.asarray(labels["jammer_type"]),
-        train_frac=cfg.split.train_frac,
-        test_frac=cfg.split.test_frac,
-        valid_frac=cfg.split.valid_frac,
+        supervised=cfg.split.supervised,
+        unsupervised=cfg.split.unsupervised,
         left_out_types=tuple(cfg.split.left_out_types),
-        seed=cfg.split.seed,
     )
     labels["split_supervised"] = split_supervised
     labels["split_unsupervised"] = split_unsupervised
