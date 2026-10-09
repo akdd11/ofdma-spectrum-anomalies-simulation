@@ -23,6 +23,7 @@ from datetime import datetime
 import hydra
 import logging
 import numpy as np
+import pandas as pd
 from omegaconf import open_dict
 from tqdm import trange
 
@@ -213,8 +214,9 @@ def generate_dataset(cfg, scene, su_coordinates):
     scene : sionna.rt.Scene
         Scene object containing the environment.
     su_coordinates : list
-        List of sensing unit coordinates, used only to determine the number
-        of SUs for drawing the per-SU hardware impairment parameters.
+        List of sensing unit coordinates, used to determine the number of SUs
+        for drawing the per-SU hardware impairment parameters and persisted to
+        su_coordinates.csv in the dataset folder.
     """
 
     # generate which samples are jammed (incl. type) and which are normal
@@ -240,6 +242,14 @@ def generate_dataset(cfg, scene, su_coordinates):
     # the whole dataset, and persisted next to the other per-dataset metadata.
     su_hardware = impairment_utils.generate_su_hardware_params(len(su_coordinates), cfg)
     su_hardware.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv"))
+
+    # SU positions are static per dataset: snapshot them next to the data so the
+    # dataset stays self-describing if su_coordinates.yaml is edited later.
+    # Row index = SU index (same as the SU axis of the spectrograms).
+    su_coords_df = pd.DataFrame(
+        np.asarray(su_coordinates, dtype=float), columns=["x", "y", "z"]
+    ).rename_axis("su_idx")
+    su_coords_df.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_coordinates.csv"))
 
     for idx_sample in trange(cfg.nr_samples, desc="Generating samples"):
 

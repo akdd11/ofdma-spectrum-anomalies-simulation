@@ -35,7 +35,7 @@ The simulation workflow has been developed with Ubuntu 24.04, Python 3.10.4, and
 
 ### Create custom intermediate data
 
-Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src\conf\dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details.The coordinates of the sensing units are specified in the file `src\conf\su_coordinates.yaml`.
+Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src\conf\dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details.The coordinates of the sensing units are specified in the file `src\conf\su_coordinates.yaml`. At generation time they are also snapshotted into `su_coordinates.csv` in the dataset folder (one row per SU, columns `su_idx`, `x`, `y`, `z` in meters; `su_idx` is the same SU index as the SU axis of the spectrograms), so the dataset remains self-describing even if the yaml is edited later.
 
 The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, in which the custom intermediate data is stored in a subdirectory named `custom`.
 
