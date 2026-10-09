@@ -238,7 +238,7 @@ def generate_dataset(cfg, scene, su_coordinates):
         os.makedirs(os.path.join(_datapath, f"{cfg.dataset_nr}", "custom"))
 
     # hardware impairment parameters are a property of the SU, not of the
-    # sample (D2 in hardware_impairments.md): drawn once here, held fixed for
+    # sample: drawn once here, held fixed for
     # the whole dataset, and persisted next to the other per-dataset metadata.
     su_hardware = impairment_utils.generate_su_hardware_params(len(su_coordinates), cfg)
     su_hardware.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv"))

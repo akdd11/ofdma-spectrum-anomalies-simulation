@@ -592,7 +592,7 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         those metrics.
     """
 
-    # hardware impairments (see hardware_impairments.md), gated on the master
+    # hardware impairments, gated on the master
     # switch and their individual enabled flags
     impairments_on = bool(cfg.impairments.enabled)
     timing_offset_enabled = impairments_on and cfg.impairments.su_timing_offset.enabled
@@ -601,7 +601,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
     iq_imbalance_enabled = impairments_on and cfg.impairments.rx_iq_imbalance.enabled
 
     sample_rate_hz = cfg.subcarrier_spacing * cfg.nfft
-    dc_bin_idx = cfg.num_subcarriers // 2
 
     # create the plain user signals, first in time domain
     # and then convert to frequency domain
@@ -692,8 +691,8 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         logging.debug(f"Creating spectrogram for SU{su_idx}.")
 
         # per-SU hardware impairment parameters/derived quantities for this
-        # sample. Fixed per SU (D2), only computed/applied if enabled.
-        # Residual sub-CP timing error (5G-UE-grade sync, §4.3). It is bounded
+        # sample. Fixed per SU, only computed/applied if enabled.
+        # Residual sub-CP timing error (5G-UE-grade sync). It is bounded
         # well below the CP, so the full column count still fits and the image
         # dimensions match the grid-synchronous baseline (num_cols=None -> the
         # default 70 columns, no column dropped).
@@ -738,6 +737,11 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         if lo_offset_enabled:
             signal_time = signal_time * su_lo_rotation
 
+        if iq_imbalance_enabled:
+            signal_time = impairment_utils.apply_iq_imbalance(
+                signal_time, su_iq_alpha, su_iq_beta
+            )
+
         signal_spec = calc_complex_spectrogram(
             signal_time,
             cfg.nfft,
@@ -748,11 +752,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         signal_spec = crop_spectrogram_to_bandwidth(
             signal_spec, cfg.idx_first_sc, cfg.num_subcarriers
         )
-
-        if iq_imbalance_enabled:
-            signal_spec = impairment_utils.apply_iq_imbalance(
-                signal_spec, su_iq_alpha, su_iq_beta
-            )
 
         signal_power = np.mean(np.sum(np.abs(signal_spec) ** 2, axis=0))
 
@@ -784,6 +783,11 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
                     jammer_signal_time_after_channel * su_lo_rotation
                 )
 
+            if iq_imbalance_enabled:
+                jammer_signal_time_after_channel = impairment_utils.apply_iq_imbalance(
+                    jammer_signal_time_after_channel, su_iq_alpha, su_iq_beta
+                )
+
             jammer_spec = calc_complex_spectrogram(
                 jammer_signal_time_after_channel,
                 cfg.nfft,
@@ -794,11 +798,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
             jammer_spec = crop_spectrogram_to_bandwidth(
                 jammer_spec, cfg.idx_first_sc, cfg.num_subcarriers
             )
-
-            if iq_imbalance_enabled:
-                jammer_spec = impairment_utils.apply_iq_imbalance(
-                    jammer_spec, su_iq_alpha, su_iq_beta
-                )
 
             jammer_power = np.mean(np.sum(np.abs(jammer_spec) ** 2, axis=0))
             sample.sjr_by_su[su_idx] = 10 * np.log10(signal_power / jammer_power)
@@ -815,6 +814,17 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
             noise_signal = scale_time_signal_to_target_power(
                 noise_signal, cfg.p_noise_dbm
             )
+
+            if dc_offset_enabled:
+                # folded into the noise/background term rather than any
+                # signal or jammer component
+                noise_signal = impairment_utils.apply_dc_offset(
+                    noise_signal,
+                    cfg.nfft,
+                    su_hardware.loc[su_idx, "dc_offset_over_noise_db"],
+                    su_hardware.loc[su_idx, "dc_offset_phase_rad"],
+                )
+
             noise_spec = calc_complex_spectrogram(
                 noise_signal,
                 cfg.nfft,
@@ -825,16 +835,6 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
             noise_spec = crop_spectrogram_to_bandwidth(
                 noise_spec, cfg.idx_first_sc, cfg.num_subcarriers
             )
-
-            if dc_offset_enabled:
-                # folded into the noise/background term rather than any
-                # signal or jammer component (D4), see hardware_impairments.md §4.1
-                noise_spec = impairment_utils.apply_dc_offset(
-                    noise_spec,
-                    dc_bin_idx,
-                    su_hardware.loc[su_idx, "dc_offset_over_noise_db"],
-                    su_hardware.loc[su_idx, "dc_offset_phase_rad"],
-                )
 
             noise_power = np.mean(np.sum(np.abs(noise_spec) ** 2, axis=0))
             sample.snr_by_su[su_idx] = 10 * np.log10(signal_power / noise_power)

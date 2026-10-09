@@ -41,7 +41,10 @@ The generated data is stored in the directory that is specified in the file `dat
 
 ### Hardware impairments
 
-Optional receiver-side hardware impairments (SU STFT timing offset, SU LO frequency offset, RX DC offset, RX IQ imbalance) can be enabled under the `impairments:` block in `src/conf/dataset_generation.yaml`. A master `impairments.enabled` switch gates all of them at once (for an ideal-vs-impaired ablation); each impairment also has its own `enabled` flag so individual impairments can be toggled independently. See `hardware_impairments.md` for the physical rationale, parameterization and literature references behind every impairment.
+> [!WARNING]
+> **TODO – explain hardware impairments**
+
+Optional receiver-side hardware impairments (SU STFT timing offset, SU LO frequency offset, RX DC offset, RX IQ imbalance) can be enabled under the `impairments:` block in `src/conf/dataset_generation.yaml`. A master `impairments.enabled` switch gates all of them at once (for an ideal-vs-impaired ablation); each impairment also has its own `enabled` flag so individual impairments can be toggled independently.
 
 Impairment parameters are properties of a sensing unit's hardware, not of a sample: they are drawn once per SU (seeded by `impairments.su_hardware_seed`) and held fixed for the whole dataset, rather than redrawn per sample. They are persisted to `su_hardware.csv` in the dataset folder (one row per SU), with columns `timing_offset_samples`, `lo_freq_offset_ppm`, `dc_offset_over_noise_db`, `dc_offset_phase_rad`, `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, and `iq_irr_db` (derived, informational only). The models are implemented in `src/utils/impairment_utils.py`.
 

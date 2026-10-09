@@ -659,17 +659,15 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris", offset=0, 
         Window function to use for the spectrogram.
     offset : int
         Sample index at which the first analysis window starts. Used to
-        model a SU's STFT timing offset against the OFDM symbol grid (see
-        hardware_impairments.md §4.3). Default: 0 (grid-synchronous, as
-        before).
+        model a SU's STFT timing offset against the OFDM symbol grid.
+        Default: 0 (grid-synchronous, as before).
     num_cols : int, optional
         Number of columns (analysis windows) to compute. If None, it is
         derived from `len(sig)` and `offset` as before, i.e. as many
         columns as fit. Explicitly fixing it (e.g. to a value below the
         default) is what makes the offset applicable irrespective of its
         actual per-SU value while keeping the image dimensions constant
-        across the dataset (see hardware_impairments.md, D7 / §4.3
-        implementation notes).
+        across the dataset.
 
     Returns
     -------

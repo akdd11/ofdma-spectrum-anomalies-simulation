@@ -1,4 +1,4 @@
-nr_samples: 40  # Number of samples to generate
+nr_samples: 20000  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
 
 gpu_id: 0         # Index of the single GPU Sionna RT (Mitsuba/Dr.Jit) should run on;
@@ -37,40 +37,32 @@ pilot_slots: [2]            # Indexes of the pilot symbols for channel estimatio
 su_noise_figure: 10         # Noise figure of the SU in dB
 additional_impairments: 15  # Additional impairments in dB to be added to the noise power to prevent overly optimistic SNR values
 
-# Hardware impairments (see hardware_impairments.md for the rationale behind
-# every parameter below). Hardware parameters are drawn once per SU with a
+# Hardware impairments. Hardware parameters are drawn once per SU with a
 # dedicated seed and held fixed for the whole dataset (persisted to
 # su_hardware.csv), never redrawn per sample.
 impairments:
   enabled: True         # master switch; every sub-block below is also gated on this
   su_hardware_seed: 1234  # dedicated seed for drawing per-SU hardware parameters
 
-  su_timing_offset:      # §4.3: residual STFT-window timing error after network sync
+  su_timing_offset:      # residual STFT-window timing error after network sync
     enabled: True         # SU is time-synchronized to the network to 5G-UE accuracy;
                           # residual |tau| drawn uniformly in [0, max_timing_error_ns] per SU
     max_timing_error_ns: 390   # 3GPP TS 38.133 Te for 15 kHz SCS (~12 samples at 30.72 MHz,
                                # ~8% of the CP); stays inside the ISI-free CP -> magnitude negligible
 
-  su_lo_freq_offset:     # §4.4: SU LO frequency offset, common to all emitters at that SU
+  su_lo_freq_offset:     # SU LO frequency offset, common to all emitters at that SU
     enabled: True
     ppm_min: 0.5          # TCXO, not GPS-disciplined (assumed sync'd to network, so no coarser)
     ppm_max: 2.0
 
-  rx_dc_offset:           # §4.1: RX DC offset (LO self-mixing + ADC offset)
+  rx_dc_offset:           # RX DC offset (LO self-mixing + ADC offset)
     enabled: True
     offset_over_noise_db_min: 5    # relative to the per-SU noise floor
     offset_over_noise_db_max: 20
 
-  rx_iq_imbalance:        # §4.2: RX IQ imbalance (gain/phase mismatch between I/Q paths)
+  rx_iq_imbalance:        # RX IQ imbalance (gain/phase mismatch between I/Q paths)
     enabled: True
     # Calibrated monitoring receiver: post-digital-calibration IRR ~35-45 dB
-    # (see §3/§4.2 decision). This pushes the conjugate image to/below the noise
-    # floor, matching capture-based monitoring datasets (WASD, [R11]) whose front
-    # end is factory/digitally IQ-calibrated. The raw/uncalibrated end
-    # (gain 0.3-0.8 dB, phase 2-5 deg -> IRR ~24-30 dB) is retained in
-    # hardware_impairments.md as a degraded-hardware / domain-shift ablation, not
-    # the default, because at that end the legitimate-TX image becomes visible on
-    # strong-link SUs and can mask/imitate a real jammer.
     gain_imbalance_db_min: 0.05
     gain_imbalance_db_max: 0.2
     phase_imbalance_deg_min: 0.5

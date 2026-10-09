@@ -1,15 +1,13 @@
 """Hardware impairment models for sensing units (SUs).
 
-See `hardware_impairments.md` (repository root) for the physical rationale,
-literature references and parameterization decisions behind every impairment
-implemented here:
+Impairments implemented here:
 
-* SU STFT timing offset against the OFDM symbol grid (§4.3)
-* SU LO frequency offset, common to all emitters at that SU (§4.4)
-* RX DC offset (§4.1)
-* RX IQ imbalance (§4.2)
+* SU STFT timing offset against the OFDM symbol grid
+* SU LO frequency offset, common to all emitters at that SU
+* RX DC offset
+* RX IQ imbalance
 
-Hardware parameters are properties of a device, not of a sample (D2): they are
+Hardware parameters are properties of a device, not of a sample: they are
 drawn once per SU with a dedicated seed via `generate_su_hardware_params` and
 held fixed for the whole dataset. The `apply_*` functions below are pure
 transformations applied per sample using those fixed parameters.
@@ -49,14 +47,13 @@ def generate_su_hardware_params(num_su, cfg):
 
     rng = np.random.default_rng(cfg.impairments.su_hardware_seed)
 
-    # §4.3: the SU is time-synchronized to the network to 5G-UE accuracy, so
+    # The SU is time-synchronized to the network to 5G-UE accuracy, so
     # its FFT-window timing error is only a small *residual* about the ideal
     # symbol boundary, not a uniform draw over a full symbol. Modelled as
     # |residual| in [0, max] samples, where max comes from `max_timing_error_ns`
     # (default 390 ns = 3GPP TS 38.133 Te for 15 kHz SCS ~ 12 samples at
     # 30.72 MHz, ~8 % of the CP). Because it stays inside the ISI-free part of
-    # the CP its magnitude-spectrogram effect is a pure phase ramp (negligible);
-    # see hardware_impairments.md §4.3.
+    # the CP its magnitude-spectrogram effect is a pure phase ramp (negligible).
     sample_rate_hz = cfg.subcarrier_spacing * cfg.nfft
     max_timing_error_samples = int(
         round(
@@ -67,8 +64,7 @@ def generate_su_hardware_params(num_su, cfg):
         raise ValueError(
             "impairments.su_timing_offset.max_timing_error_ns corresponds to "
             f"{max_timing_error_samples} samples, which exceeds the cyclic prefix "
-            f"({cfg.cp_len}); the synchronized-SU model assumes a sub-CP residual "
-            "(see hardware_impairments.md §4.3)."
+            f"({cfg.cp_len}); the synchronized-SU model assumes a sub-CP residual."
         )
     timing_offset_samples = rng.integers(0, max_timing_error_samples + 1, size=num_su)
 
@@ -98,8 +94,7 @@ def generate_su_hardware_params(num_su, cfg):
         size=num_su,
     )
 
-    # informational only: IRR resulting from the drawn gain/phase imbalance,
-    # see hardware_impairments.md §4.2 for the derivation of this expression
+    # informational only: IRR resulting from the drawn gain/phase imbalance
     g = 10 ** (iq_gain_imbalance_db / 20)
     phi = np.deg2rad(iq_phase_imbalance_deg)
     iq_irr_db = 10 * np.log10(
@@ -139,7 +134,7 @@ def lo_frequency_rotation(delta_f_hz, sample_rate_hz, num_samples):
     rotation : np.ndarray
         Complex exponential of length `num_samples`, to be multiplied
         elementwise with the (already channel-convolved) received time
-        signal.
+        signal, before `apply_iq_imbalance`.
     """
 
     t = np.arange(num_samples) / sample_rate_hz
@@ -149,8 +144,7 @@ def lo_frequency_rotation(delta_f_hz, sample_rate_hz, num_samples):
 def compute_iq_imbalance_coeffs(gain_imbalance_db, phase_imbalance_deg):
     """Compute the alpha/beta coefficients of a frequency-flat IQ imbalance.
 
-    Uses the standard model `y = alpha * x + beta * conj(x)`, see
-    hardware_impairments.md §4.2.
+    Uses the standard model `y = alpha * x + beta * conj(x)`.
 
     Parameters
     ----------
@@ -172,60 +166,65 @@ def compute_iq_imbalance_coeffs(gain_imbalance_db, phase_imbalance_deg):
     return alpha, beta
 
 
-def apply_iq_imbalance(spec, alpha, beta):
-    """Apply a frequency-flat IQ imbalance to a cropped complex spectrogram.
+def apply_iq_imbalance(sig, alpha, beta):
+    """Apply a frequency-flat IQ imbalance to a complex baseband time signal.
 
-    Mirrors the spectrogram about its own centre row, which is equivalent to
-    mirroring about DC because the crop is centred on the FFT's DC bin (see
-    hardware_impairments.md §4.2).
+    Applied before the STFT, so the conjugate image of subcarrier k lands
+    exactly on -k. Since the STFT window
+    is real, this is equivalent to `alpha * S[k] + beta * conj(S[-k])` in the
+    spectrogram domain, but needs no index bookkeeping on the cropped grid.
 
     Parameters
     ----------
-    spec : np.ndarray
-        Complex spectrogram, shape (num_subcarriers, num_symbols).
+    sig : np.ndarray
+        Complex baseband time signal (after channel and LO rotation).
     alpha, beta : complex
         Coefficients from `compute_iq_imbalance_coeffs`.
 
     Returns
     -------
-    spec_out : np.ndarray
-        IQ-imbalanced spectrogram, same shape as `spec`.
+    sig_out : np.ndarray
+        IQ-imbalanced time signal, same shape as `sig`.
     """
 
-    return alpha * spec + beta * np.conj(spec[::-1, :])
+    return alpha * sig + beta * np.conj(sig)
 
 
-def apply_dc_offset(noise_spec, dc_bin_idx, offset_over_noise_db, phase_rad):
-    """Add a persistent per-SU DC offset to the centre (DC) bin of a spectrogram.
+def apply_dc_offset(noise_sig, nfft, offset_over_noise_db, phase_rad):
+    """Add a persistent per-SU DC offset to a complex baseband noise signal.
 
-    Folded into the noise/background component (D4) rather than any signal or
-    jammer component, since the DC offset belongs to neither. The magnitude
-    is parameterized relative to the actual per-RE noise floor of the given
-    `noise_spec` (see hardware_impairments.md §4.1), so it tracks the
-    instantaneous noise realization while the dB offset and phase stay fixed
-    hardware properties of the SU.
+    Folded into the noise/background component rather than any signal or
+    jammer component, since the DC offset belongs to neither. Added as a
+    constant in the time domain, so the STFT window spreads it over the bins
+    around DC exactly as in a real receiver (7 bins for Blackman-Harris).
+
+    The magnitude is parameterized relative to the actual noise power of the
+    given `noise_sig`, so it tracks the instantaneous noise realization while
+    the dB offset and phase stay fixed hardware properties of the SU.
+    `offset_over_noise_db` is the *total* DC power relative to the noise power
+    per FFT bin (`mean(|noise_sig|^2) / nfft`). In the spectrogram, the sum of
+    the DC footprint over all bins therefore sits `offset_over_noise_db` above
+    the mean per-RE noise power; the centre bin alone holds 1/ENBW of it
+    (about -3 dB for Blackman-Harris).
 
     Parameters
     ----------
-    noise_spec : np.ndarray
-        Complex noise spectrogram, shape (num_subcarriers, num_symbols).
-        Modified in place and also returned.
-    dc_bin_idx : int
-        Row index of the DC bin in the cropped spectrogram grid
-        (`num_subcarriers // 2`).
+    noise_sig : np.ndarray
+        Complex baseband noise time signal.
+    nfft : int
+        FFT size of the subsequent STFT, i.e. the number of bins the noise
+        power is spread over.
     offset_over_noise_db : float
-        DC offset power relative to the mean per-RE noise power, in dB.
+        Total DC offset power relative to the noise power per FFT bin, in dB.
     phase_rad : float
         Fixed phase of the (complex) DC offset.
 
     Returns
     -------
-    noise_spec : np.ndarray
-        `noise_spec` with the DC offset added at `dc_bin_idx`, for every
-        column.
+    noise_sig_out : np.ndarray
+        `noise_sig` plus the constant DC offset.
     """
 
-    noise_power_per_re = np.mean(np.abs(noise_spec) ** 2)
-    dc_amplitude = np.sqrt(noise_power_per_re * 10 ** (offset_over_noise_db / 10))
-    noise_spec[dc_bin_idx, :] += dc_amplitude * np.exp(1j * phase_rad)
-    return noise_spec
+    noise_power_per_bin = np.mean(np.abs(noise_sig) ** 2) / nfft
+    dc_amplitude = np.sqrt(noise_power_per_bin * 10 ** (offset_over_noise_db / 10))
+    return noise_sig + dc_amplitude * np.exp(1j * phase_rad)
