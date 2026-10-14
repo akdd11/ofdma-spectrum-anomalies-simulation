@@ -31,13 +31,15 @@ Open Blender and go to the Scripting workspace. Open the `blender-python/create_
 
 ### Requirements
 
-The simulation workflow has been developed with Ubuntu 24.04, Python 3.10.4, and Sionna 1.2.2. The requirements for the Python virtual environment are listed in the file `requirements_simulation.txt`.
+The datasets have been generated with Python 3.12.12 and Sionna (RT) 1.2.1 (Mitsuba 3.7.1, Dr.Jit 1.2.0) on Windows Server 2025 with an NVIDIA L40S GPU. The exact package versions of that environment are pinned in the file `requirements_simulation.txt`. Scene creation with Blender (`blender-python/`) additionally needs `bpy`, which is not part of this environment.
 
 ### Create custom intermediate data
 
 Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src\conf\dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details.The coordinates of the sensing units are specified in the file `src\conf\su_coordinates.yaml`. At generation time they are also snapshotted into `su_coordinates.csv` in the dataset folder (one row per SU, columns `su_idx`, `x`, `y`, `z` in meters; `su_idx` is the same SU index as the SU axis of the spectrograms), so the dataset remains self-describing even if the yaml is edited later.
 
 The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, in which the custom intermediate data is stored in a subdirectory named `custom`.
+
+All per-sample random draws (transmitter and jammer positions, resource allocation, payload, jammer waveform, noise) use the global NumPy RNG, seeded by `seed` in the config; none of them depends on the ray-tracing result, so this part is reproduced exactly. The Sionna RT path solver samples its rays with a fixed seed as well, but on the GPU it is not bit-exact: paths are collected with atomic operations, so their order (and occasionally a single weak path) varies between runs. Measured on scene 0, the per-link received power differed by at most 0.03 dB between repeated runs and separate processes. In two complete generation runs with the same seed (10 samples × 21 SUs), all drawn quantities were identical, the per-SU SNR agreed within 0.02 dB, 0.05 % of the resource elements differed by more than one 8-bit quantization step (0.37 dB), and 0.001 % by more than 1 dB (low-level REs near the noise floor, where small channel changes shift partial cancellations). A regenerated dataset is therefore identical up to these deviations, not bit-identical. The resolved configuration of each run, including the seed, command-line overrides and derived quantities, is saved as `config.yaml` in the dataset folder.
 
 ### Hardware impairments
 

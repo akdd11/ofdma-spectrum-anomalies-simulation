@@ -24,7 +24,7 @@ import hydra
 import logging
 import numpy as np
 import pandas as pd
-from omegaconf import open_dict
+from omegaconf import OmegaConf, open_dict
 from tqdm import trange
 
 import sionna.rt as srt
@@ -123,7 +123,9 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
         # jammers are only added for visualization purposes
         for jam_idx, jam in enumerate(sample.jammers):
             sjam = srt.Transmitter(
-                name=f"jam{jam_idx}", position=jam.location, orientation=jam.orientation
+                name=f"jam{jam_idx}",
+                position=np.array(jam.location),
+                orientation=np.array(jam.orientation),
             )
             scene.add(sjam)
 
@@ -140,6 +142,7 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
         samples_per_src=int(cfg.sionna.num_rays),
         specular_reflection=True,
         refraction=True,
+        diffraction=bool(cfg.sionna.diffraction),
     )
 
     # calculate the channel frequency response
@@ -161,9 +164,14 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
         # configure the jammer antenna pattern
         scene = rt_utils.configure_tx_antenna_pattern(scene, jammer_pattern)
 
-        # add the jammer to the scene
+        # add the jammer to the scene, with its random orientation: the
+        # directional antenna pattern points along the drawn yaw
         for jam_idx, jam in enumerate(sample.jammers):
-            sjam = srt.Transmitter(name=f"jam{jam_idx}", position=jam.location)
+            sjam = srt.Transmitter(
+                name=f"jam{jam_idx}",
+                position=np.array(jam.location),
+                orientation=np.array(jam.orientation),
+            )  # numpy arrays for mitsuba compatibility
             scene.add(sjam)
         paths_jam = p_solver(
             scene=scene,
@@ -171,6 +179,7 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
             samples_per_src=int(cfg.sionna.num_rays),
             specular_reflection=True,
             refraction=True,
+            diffraction=bool(cfg.sionna.diffraction),
         )
         h_jam = paths_jam.cfr(
             fft_freq,
@@ -249,7 +258,13 @@ def generate_dataset(cfg, scene, su_coordinates):
     su_coords_df = pd.DataFrame(
         np.asarray(su_coordinates, dtype=float), columns=["x", "y", "z"]
     ).rename_axis("su_idx")
-    su_coords_df.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_coordinates.csv"))
+    su_coords_df.to_csv(
+        os.path.join(_datapath, f"{cfg.dataset_nr}", "su_coordinates.csv")
+    )
+
+    # snapshot the resolved config (incl. seed, command-line overrides and the
+    # derived quantities) so the dataset can be regenerated from its own folder
+    OmegaConf.save(cfg, os.path.join(_datapath, f"{cfg.dataset_nr}", "config.yaml"))
 
     for idx_sample in trange(cfg.nr_samples, desc="Generating samples"):
 
@@ -349,6 +364,9 @@ if __name__ == "__main__":
 
     if args.num_samples is not None:
         cfg.nr_samples = args.num_samples
+
+    # seed the global numpy RNG, which drives every per-sample draw.
+    np.random.seed(cfg.seed)
 
     logging.info(f"Generating dataset with {cfg.nr_samples} samples.")
 

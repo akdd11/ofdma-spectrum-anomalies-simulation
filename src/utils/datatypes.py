@@ -190,7 +190,7 @@ class Sample:
         if vmax is None:
             vmax = np.max(self.spectrograms[su_idx])
 
-        sns.heatmap(
+        ax = sns.heatmap(
             self.spectrograms[su_idx],
             cbar=cbar,
             cbar_kws={"label": "Power [dBm]"},
@@ -198,6 +198,7 @@ class Sample:
             vmax=vmax,
             ax=ax,
         )
+        ax.invert_yaxis()  # row 0 is the lowest frequency -> frequency increasing upwards
 
         if ax is None:
             plt.title(f"SU {su_idx}")

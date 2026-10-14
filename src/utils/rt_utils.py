@@ -24,7 +24,7 @@ from utils.ofdm_utils import (
     calc_complex_spectrogram,
     calc_spectrogram,
     crop_spectrogram_to_bandwidth,
-    upsample_axis_of_2d_array,
+    jammer_mask_on_stft_grid,
 )
 from utils import impairment_utils
 
@@ -765,10 +765,17 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
 
             if su_idx == 0:
                 # the resource elements occupied by the jammer are identical for
-                # all SUs, hence the occupancy is a sample level quantity
-                jammer_mask = upsample_axis_of_2d_array(
-                    jammer_signal_freq != 0, signal_spec.shape[1], axis=1
-                ).astype(bool)
+                # all SUs, hence the occupancy is a sample level quantity. It is
+                # mapped onto the network-synchronous STFT grid by time (the
+                # per-SU sub-CP timing residual does not move a window centre
+                # across a block boundary by more than a few samples)
+                jammer_mask = jammer_mask_on_stft_grid(
+                    jammer_signal_freq,
+                    add_cp_for_jammer,
+                    cfg.nfft,
+                    cfg.cp_len,
+                    signal_spec.shape[1],
+                )
                 sample.jammer_occupancy = float(np.mean(jammer_mask))
 
             # assuming the channel of the jammer is the last one in the axis of the transmitters

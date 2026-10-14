@@ -10,6 +10,12 @@ scene_nr: 0       # Scene number
 
 dataset_nr: 2     # Dataset number
 
+seed: 42          # Seed of the global numpy RNG (scenario, allocation, payload, jammer,
+                  # noise draws). Per-SU hardware parameters use impairments.su_hardware_seed;
+                  # Sionna RT's path solver uses its own fixed default seed (42) but is not
+                  # bit-exact on the GPU (atomic path collection): per-link power varies by
+                  # <= ~0.03 dB between runs, so regeneration is reproducible, not bit-identical.
+
 f_c: 3.75e9       # Carrier frequency in Hz
 
 min_tx: 3             # Minimum number of regular transmitters
@@ -48,12 +54,14 @@ impairments:
     enabled: True         # SU is time-synchronized to the network to 5G-UE accuracy;
                           # residual |tau| drawn uniformly in [0, max_timing_error_ns] per SU
     max_timing_error_ns: 390   # 3GPP TS 38.133 Te for 15 kHz SCS (~12 samples at 30.72 MHz,
-                               # ~8% of the CP); stays inside the ISI-free CP -> magnitude negligible
+                               # ~8% of the CP).
 
-  su_lo_freq_offset:     # SU LO frequency offset, common to all emitters at that SU
-    enabled: True
-    ppm_min: 0.5          # TCXO, not GPS-disciplined (assumed sync'd to network, so no coarser)
-    ppm_max: 2.0
+  su_lo_freq_offset:     # residual SU LO frequency offset after network sync, common to all emitters at that SU
+    enabled: True         # SU is frequency-locked to the network DL to 5G-UE accuracy;
+                          # residual |offset| drawn uniformly in [ppm_min, ppm_max] per SU, random sign
+    ppm_min: 0.0
+    ppm_max: 0.1          # 3GPP TS 38.101-1 UE frequency error (+-0.1 ppm rel. to the received gNB carrier);
+                          # 375 Hz = 0.025 SCS at 3.75 GHz -> magnitude-negligible.
 
   rx_dc_offset:           # RX DC offset (LO self-mixing + ADC offset)
     enabled: True
@@ -62,18 +70,19 @@ impairments:
 
   rx_iq_imbalance:        # RX IQ imbalance (gain/phase mismatch between I/Q paths)
     enabled: True
-    # Calibrated monitoring receiver: post-digital-calibration IRR ~35-45 dB
-    gain_imbalance_db_min: 0.05
-    gain_imbalance_db_max: 0.2
-    phase_imbalance_deg_min: 0.5
-    phase_imbalance_deg_max: 1.5
+    # Calibrated monitoring receiver: post-digital-calibration IRR ~45-55 dB (AD9361 ~50 dB calibrated).
+    gain_imbalance_db_min: 0.02
+    gain_imbalance_db_max: 0.05
+    phase_imbalance_deg_min: 0.15
+    phase_imbalance_deg_max: 0.6
 
 # Ray tracing parameters
 sionna:
   tx_height: 1.5          # Transmitter height in meters
-  max_depth: 4            # Maximum number of reflections
-  num_rays: 1e5           # Number of rays started per source
-  diffraction: True       # Whether to include diffraction in the ray tracing
+  max_depth: 4            # Maximum number of interactions per path
+  num_rays: 1e6           # Number of rays started per source. With diffraction 1e5 is not
+                          # converged (single links up to ~20 dB off vs. 1e6); 1e6 costs ~0.1 s/sample
+  diffraction: True       # Wedge diffraction (cabinet edges/corners), passed to the path solver.
 
 plots:
   jammer_spectrogram: False

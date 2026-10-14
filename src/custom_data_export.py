@@ -523,7 +523,7 @@ def parse_arguments(default_dataset_nr):
         type=bool,
         default=False,
         required=False,
-        help="If True, the resource allocation image will be binary. If False,"
+        help="If True, the resource allocation image will be binary. If False (default),"
         " the resource allocation image will contain the corresponding transmitter"
         " index (starting with 1) for allocated resources, and 0 for non-allocated.",
     )

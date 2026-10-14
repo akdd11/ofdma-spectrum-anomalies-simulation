@@ -68,6 +68,10 @@ def generate_su_hardware_params(num_su, cfg):
         )
     timing_offset_samples = rng.integers(0, max_timing_error_samples + 1, size=num_su)
 
+    # The SU is also frequency-locked to the network DL, so its LO offset is a
+    # residual about the network carrier (default <= 0.1 ppm, the 3GPP UE
+    # frequency-error limit; 375 Hz = 0.025 SCS at 3.75 GHz), not the
+    # tolerance of a free-running TCXO. Signed, magnitude uniform in the range.
     lo_ppm_magnitude = rng.uniform(
         cfg.impairments.su_lo_freq_offset.ppm_min,
         cfg.impairments.su_lo_freq_offset.ppm_max,

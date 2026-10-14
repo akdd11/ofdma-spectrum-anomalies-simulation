@@ -527,7 +527,7 @@ def generate_sweep_jammer_signal(num_sc, num_symbols, subcarriers_per_rb, nfft, 
     return jammer_signal_freq, False
 
 
-def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
+def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, nfft, cp_len):
     """Generate a random hopping jammer signal which transmits a
     tone (sine signal) on a randomly hopping center frequency.
     Additionally, the jammer has a certain duty cycle, i.e., it is
@@ -539,6 +539,8 @@ def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
         Number of subcarriers.
     num_symbols : int
         Number of symbols.
+    nfft : int
+        FFT size, i.e. the length of one jammer block in samples (no CP).
     cp_len : int
         Length of the cyclic prefix.
 
@@ -552,8 +554,8 @@ def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
     """
 
     # the missing CP is compensated by adding additional OFDM symbols to match the
-    # required length of the time signal
-    num_symbols_jammer = num_symbols + int(np.ceil(cp_len * num_symbols / num_sc))
+    # required length of the time signal (blocks are nfft samples long)
+    num_symbols_jammer = num_symbols + int(np.ceil(cp_len * num_symbols / nfft))
 
     hop_cycle = np.random.randint(2, num_symbols_jammer)
     duty_cycle = np.random.uniform(0.2, 1)
@@ -636,7 +638,7 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
         )
     elif jammer_type == "random_hop":
         jammer_signal, add_cp = generate_random_hopping_tone_jammer_signal(
-            cfg.num_subcarriers, cfg.n_slots * cfg.symbols_per_slot, cfg.cp_len
+            cfg.num_subcarriers, cfg.n_slots * cfg.symbols_per_slot, cfg.nfft, cfg.cp_len
         )
     else:
         raise ValueError(f"Jammer {jammer_type} type not implemented.")
@@ -644,7 +646,9 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
     return jammer_signal, add_cp
 
 
-def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris", offset=0, num_cols=None):
+def calc_complex_spectrogram(
+    sig, nfft, hop, window="blackmanharris", offset=0, num_cols=None
+):
     """Calculate the complex spectrogram of a signal.
 
     Parameters
@@ -685,7 +689,7 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris", offset=0, 
 
     for col in range(num_cols):
         idx = offset + col * hop
-        if idx + nfft >= len(sig):
+        if idx + nfft > len(sig):
             break
         spec[:, col] = np.fft.fft(sig[idx : idx + nfft] * win, n=nfft, norm="ortho")
 
@@ -810,6 +814,79 @@ def upsample_axis_of_2d_array(arr, new_dim, axis):
     interp_func = interp1d(x_old, arr, kind="nearest", axis=axis)
 
     return interp_func(x_new)
+
+
+def jammer_mask_on_stft_grid(
+    jammer_signal_freq,
+    add_cp,
+    nfft,
+    cp_len,
+    num_cols,
+    offset=0,
+    window="blackmanharris",
+    min_energy_share=0.25,
+):
+    """Map the jammer's resource occupancy onto the columns of the STFT.
+
+    The jammer is generated as blocks in the frequency domain, which are
+    `nfft + cp_len` samples long if a CP is added and `nfft` samples long
+    otherwise. The STFT windows are `nfft` samples long and hop by
+    `nfft + cp_len`, so without a CP the block grid drifts against the window
+    grid (75 blocks over 70 columns) and a block can straddle two windows.
+    A block marks every column in which it contributes at least
+    `min_energy_share` of the analysis window's energy (default 1/4, i.e. its
+    resource elements are lifted to within 6 dB of a fully covered window).
+    With this threshold every block is marked in at least one column. With a
+    CP each window lies inside one block, so this is the identity mapping.
+
+    Parameters
+    ----------
+    jammer_signal_freq : np.ndarray
+        Jammer signal in frequency domain, shape (num_sc, num_blocks).
+    add_cp : bool
+        Whether a CP was added to each block when converting to time domain.
+    nfft : int
+        FFT size.
+    cp_len : int
+        Length of the cyclic prefix in samples.
+    num_cols : int
+        Number of STFT columns.
+    offset : int
+        Sample index at which the first analysis window starts. Default: 0,
+        i.e. the network-synchronous symbol grid.
+    window : str
+        STFT window, as in `calc_complex_spectrogram`.
+    min_energy_share : float
+        Minimum share of the window energy a block must contribute to mark
+        the column.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Boolean array of shape (num_sc, num_cols), True where the jammer
+        occupies the resource element.
+    """
+
+    block_len = nfft + cp_len if add_cp else nfft
+    num_blocks = jammer_signal_freq.shape[1]
+    occupied = jammer_signal_freq != 0
+
+    # cumulative window energy, to get the share of any sub-interval
+    win_energy = scsig.windows.get_window(window, nfft) ** 2
+    cum_energy = np.concatenate(([0.0], np.cumsum(win_energy))) / win_energy.sum()
+
+    mask = np.zeros((jammer_signal_freq.shape[0], num_cols), dtype=bool)
+    for col in range(num_cols):
+        start = offset + col * (nfft + cp_len)
+        for block in range(start // block_len, (start + nfft - 1) // block_len + 1):
+            if block >= num_blocks:
+                break
+            lo = max(block * block_len, start) - start
+            hi = min((block + 1) * block_len, start + nfft) - start
+            if cum_energy[hi] - cum_energy[lo] >= min_energy_share:
+                mask[:, col] |= occupied[:, block]
+
+    return mask
 
 
 def average_power_per_subcarrier(spec, allocated_resources_upsampled):
