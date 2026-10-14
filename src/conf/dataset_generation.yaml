@@ -10,12 +10,7 @@ scene_nr: 0       # Scene number
 
 dataset_nr: 2     # Dataset number
 
-seed: 42          # Seed of the global numpy RNG (scenario, allocation, payload, jammer,
-                  # noise draws). Per-SU hardware parameters use impairments.su_hardware_seed;
-                  # Sionna RT's path solver uses its own fixed default seed (42) but is not
-                  # bit-exact on the GPU (atomic path collection): per-link power varies by
-                  # <= ~0.03 dB between runs, so regeneration is reproducible, not bit-identical.
-
+seed: 42          # Seed of the global numpy RNG (scenario, allocation, payload, jammer, noise draws).
 f_c: 3.75e9       # Carrier frequency in Hz
 
 min_tx: 3             # Minimum number of regular transmitters
