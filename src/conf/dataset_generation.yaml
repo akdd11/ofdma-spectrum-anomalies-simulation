@@ -1,16 +1,21 @@
-nr_samples: 2000  # Number of samples to generate
+nr_samples: 20000  # Number of samples to generate
 batch_size: 32    # Samples are saved in batches to keep files at a reasonable size
+
+gpu_id: 0         # Index of the single GPU Sionna RT (Mitsuba/Dr.Jit) should run on;
+                  # set via CUDA_VISIBLE_DEVICES before any CUDA init to avoid touching
+                  # every visible GPU. Override with the CUDA_VISIBLE_DEVICES env var directly
+                  # if you need to pick a device before this file is even read.
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 0     # Dataset number
+dataset_nr: 2     # Dataset number
 
+seed: 42          # Seed of the global numpy RNG (scenario, allocation, payload, jammer, noise draws).
 f_c: 3.75e9       # Carrier frequency in Hz
 
 min_tx: 3             # Minimum number of regular transmitters
 max_tx: 10            # Maximum number of regular transmitters
 tx_power: 10          # Transmit power of regular transmitter in dBm
-oob_suppression: -20  # Out-of-band suppression in dB
 
 jam_probability: 0.5        # Probability of a jammer being present in the scene
 jam_power:                  # Jammer transmit power in dBm
@@ -25,7 +30,7 @@ subcarriers_per_rb: 12      # Number of subcarriers per resource block
 slot_length: 1e-3           # Slot length in seconds
 n_slots: 5                  # Number of slots for monitoring
 symbols_per_slot: 14        # Number of symbols per slot
-bits_per_symbol: 2          # Number of bits per symbol for QAM modulation
+bits_per_symbol: [2, 4, 6]  # Possible numbers of bits per symbol for QAM modulation, randomly chosen per transmitter/deceptive jammer
 nfft: 2048                  # Number of FFT points
 cp_len: 144                 # Cyclic prefix length in samples
 pilot_slots: [2]            # Indexes of the pilot symbols for channel estimation
@@ -33,12 +38,46 @@ pilot_slots: [2]            # Indexes of the pilot symbols for channel estimatio
 su_noise_figure: 10         # Noise figure of the SU in dB
 additional_impairments: 15  # Additional impairments in dB to be added to the noise power to prevent overly optimistic SNR values
 
+# Hardware impairments. Hardware parameters are drawn once per SU with a
+# dedicated seed and held fixed for the whole dataset (persisted to
+# su_hardware.csv), never redrawn per sample.
+impairments:
+  enabled: True         # master switch; every sub-block below is also gated on this
+  su_hardware_seed: 1234  # dedicated seed for drawing per-SU hardware parameters
+
+  su_timing_offset:      # residual STFT-window timing error after network sync
+    enabled: True         # SU is time-synchronized to the network to 5G-UE accuracy;
+                          # residual |tau| drawn uniformly in [0, max_timing_error_ns] per SU
+    max_timing_error_ns: 390   # 3GPP TS 38.133 Te for 15 kHz SCS (~12 samples at 30.72 MHz,
+                               # ~8% of the CP).
+
+  su_lo_freq_offset:     # residual SU LO frequency offset after network sync, common to all emitters at that SU
+    enabled: True         # SU is frequency-locked to the network DL to 5G-UE accuracy;
+                          # residual |offset| drawn uniformly in [ppm_min, ppm_max] per SU, random sign
+    ppm_min: 0.0
+    ppm_max: 0.1          # 3GPP TS 38.101-1 UE frequency error (+-0.1 ppm rel. to the received gNB carrier);
+                          # 375 Hz = 0.025 SCS at 3.75 GHz -> magnitude-negligible.
+
+  rx_dc_offset:           # RX DC offset (LO self-mixing + ADC offset)
+    enabled: True
+    offset_over_noise_db_min: 5    # relative to the per-SU noise floor
+    offset_over_noise_db_max: 20
+
+  rx_iq_imbalance:        # RX IQ imbalance (gain/phase mismatch between I/Q paths)
+    enabled: True
+    # Calibrated monitoring receiver: post-digital-calibration IRR ~45-55 dB (AD9361 ~50 dB calibrated).
+    gain_imbalance_db_min: 0.02
+    gain_imbalance_db_max: 0.05
+    phase_imbalance_deg_min: 0.15
+    phase_imbalance_deg_max: 0.6
+
 # Ray tracing parameters
 sionna:
   tx_height: 1.5          # Transmitter height in meters
-  max_depth: 4            # Maximum number of reflections
-  num_rays: 1e5           # Number of rays started per source
-  diffraction: True       # Whether to include diffraction in the ray tracing
+  max_depth: 4            # Maximum number of interactions per path
+  num_rays: 1e6           # Number of rays started per source. With diffraction 1e5 is not
+                          # converged (single links up to ~20 dB off vs. 1e6); 1e6 costs ~0.1 s/sample
+  diffraction: True       # Wedge diffraction (cabinet edges/corners), passed to the path solver.
 
 plots:
   jammer_spectrogram: False
@@ -49,3 +88,25 @@ plots:
   scenario_rendered: False
 
 logging: False
+
+# Train/valid/test split assignment written to labels.csv (see README for
+# details). Fixed sample counts per protocol, reproducing the split used for
+# the paper submission: for each class, samples are taken positionally in
+# generation order -- the first num_train_* go to train, the next
+# num_valid_* to valid, and the *last* num_test_* to test. Anomaly counts
+# are divided evenly across jammer types (train/valid only across types not
+# in left_out_types; test across every type, including left_out_types).
+split:
+  left_out_types: ["random_hop"]  # only assigned to test, never train/valid (OOD generalization eval)
+  supervised:
+    num_train_normal: 5900
+    num_valid_normal: 100
+    num_test_normal: 1000
+    num_train_anomaly: 5900
+    num_valid_anomaly: 100
+    num_test_anomaly: 2500
+  unsupervised:
+    num_train_normal: 8800
+    num_valid_normal: 200
+    num_test_normal: 1000
+    num_test_anomaly: 2500

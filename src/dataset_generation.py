@@ -7,13 +7,24 @@ __docformat__ = "numpy"
 
 import os
 
+import yaml
+
+# limit to one GPU (can be specified in the config file)
+_config_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "conf", "dataset_generation.yaml"
+)
+with open(_config_path, "r") as _f:
+    _gpu_id = yaml.safe_load(_f).get("gpu_id", 0)
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(_gpu_id))
+
 import argparse
 import pickle as pkl
 from datetime import datetime
 import hydra
 import logging
 import numpy as np
-from omegaconf import open_dict
+import pandas as pd
+from omegaconf import OmegaConf, open_dict
 from tqdm import trange
 
 import sionna.rt as srt
@@ -22,14 +33,14 @@ import sionna.rt as srt
 _repo_name = "ofdma-spectrum-anomalies-simulation"
 _module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
 
-from utils import rt_utils, ofdm_utils
+from utils import rt_utils, ofdm_utils, impairment_utils
 from utils.data_utils import get_datapath
 from utils.datatypes import Transmitter, Jammer, Sample
 
 _datapath = get_datapath(_repo_name)
 
 
-def generate_sample(cfg, scene, jammer_type):
+def generate_sample(cfg, scene, jammer_type, su_hardware):
     """Generate one sample (realization) for the dataset.
 
     Parameters
@@ -40,6 +51,9 @@ def generate_sample(cfg, scene, jammer_type):
         Scene object containing the environment.
     jammer_type : str
         The type of the jammer for the sample, e.g., "normal", "deceptive", "sweep", "barrage", or "pilot".
+    su_hardware : pd.DataFrame
+        Per-SU hardware impairment parameters, fixed for the whole dataset.
+        See `impairment_utils.generate_su_hardware_params`.
 
     Returns
     -------
@@ -109,7 +123,9 @@ def generate_sample(cfg, scene, jammer_type):
         # jammers are only added for visualization purposes
         for jam_idx, jam in enumerate(sample.jammers):
             sjam = srt.Transmitter(
-                name=f"jam{jam_idx}", position=jam.location, orientation=jam.orientation
+                name=f"jam{jam_idx}",
+                position=np.array(jam.location),
+                orientation=np.array(jam.orientation),
             )
             scene.add(sjam)
 
@@ -126,6 +142,7 @@ def generate_sample(cfg, scene, jammer_type):
         samples_per_src=int(cfg.sionna.num_rays),
         specular_reflection=True,
         refraction=True,
+        diffraction=bool(cfg.sionna.diffraction),
     )
 
     # calculate the channel frequency response
@@ -147,9 +164,14 @@ def generate_sample(cfg, scene, jammer_type):
         # configure the jammer antenna pattern
         scene = rt_utils.configure_tx_antenna_pattern(scene, jammer_pattern)
 
-        # add the jammer to the scene
+        # add the jammer to the scene, with its random orientation: the
+        # directional antenna pattern points along the drawn yaw
         for jam_idx, jam in enumerate(sample.jammers):
-            sjam = srt.Transmitter(name=f"jam{jam_idx}", position=jam.location)
+            sjam = srt.Transmitter(
+                name=f"jam{jam_idx}",
+                position=np.array(jam.location),
+                orientation=np.array(jam.orientation),
+            )  # numpy arrays for mitsuba compatibility
             scene.add(sjam)
         paths_jam = p_solver(
             scene=scene,
@@ -157,6 +179,7 @@ def generate_sample(cfg, scene, jammer_type):
             samples_per_src=int(cfg.sionna.num_rays),
             specular_reflection=True,
             refraction=True,
+            diffraction=bool(cfg.sionna.diffraction),
         )
         h_jam = paths_jam.cfr(
             fft_freq,
@@ -179,7 +202,7 @@ def generate_sample(cfg, scene, jammer_type):
         rt_utils.plot_frequency_responses(fft_freq, h, len(sample.jammers))
 
     # use the assigned resources together with the assigned resources to create the spectrograms
-    sample = rt_utils.create_spectrograms(sample, cfg, h, noise=True)
+    sample = rt_utils.create_spectrograms(sample, cfg, h, su_hardware, noise=True)
 
     if cfg.plots.all_spectrograms:
         sample.plot_all_spectrograms()
@@ -187,7 +210,7 @@ def generate_sample(cfg, scene, jammer_type):
     return sample
 
 
-def generate_dataset(cfg, scene):
+def generate_dataset(cfg, scene, su_coordinates):
     """Generate a dataset for the given scene.
 
     The dataset consists of samples with different legitimate transmitter counts and jamming types.
@@ -199,6 +222,10 @@ def generate_dataset(cfg, scene):
         Configuration object containing the parameters for the dataset generation.
     scene : sionna.rt.Scene
         Scene object containing the environment.
+    su_coordinates : list
+        List of sensing unit coordinates, used to determine the number of SUs
+        for drawing the per-SU hardware impairment parameters and persisted to
+        su_coordinates.csv in the dataset folder.
     """
 
     # generate which samples are jammed (incl. type) and which are normal
@@ -219,6 +246,26 @@ def generate_dataset(cfg, scene):
     if not os.path.exists(os.path.join(_datapath, f"{cfg.dataset_nr}", "custom")):
         os.makedirs(os.path.join(_datapath, f"{cfg.dataset_nr}", "custom"))
 
+    # hardware impairment parameters are a property of the SU, not of the
+    # sample: drawn once here, held fixed for
+    # the whole dataset, and persisted next to the other per-dataset metadata.
+    su_hardware = impairment_utils.generate_su_hardware_params(len(su_coordinates), cfg)
+    su_hardware.to_csv(os.path.join(_datapath, f"{cfg.dataset_nr}", "su_hardware.csv"))
+
+    # SU positions are static per dataset: snapshot them next to the data so the
+    # dataset stays self-describing if su_coordinates.yaml is edited later.
+    # Row index = SU index (same as the SU axis of the spectrograms).
+    su_coords_df = pd.DataFrame(
+        np.asarray(su_coordinates, dtype=float), columns=["x", "y", "z"]
+    ).rename_axis("su_idx")
+    su_coords_df.to_csv(
+        os.path.join(_datapath, f"{cfg.dataset_nr}", "su_coordinates.csv")
+    )
+
+    # snapshot the resolved config (incl. seed, command-line overrides and the
+    # derived quantities) so the dataset can be regenerated from its own folder
+    OmegaConf.save(cfg, os.path.join(_datapath, f"{cfg.dataset_nr}", "config.yaml"))
+
     for idx_sample in trange(cfg.nr_samples, desc="Generating samples"):
 
         logging.debug(f"Sample {idx_sample} -----------------------")
@@ -227,7 +274,9 @@ def generate_dataset(cfg, scene):
             # very rarely, a ValueError occurs that needs to be caught and
             # is handled by simply trying to generate the sample again
             try:
-                samples.append(generate_sample(cfg, scene, sample_type[idx_sample]))
+                samples.append(
+                    generate_sample(cfg, scene, sample_type[idx_sample], su_hardware)
+                )
                 break
             except ValueError:
                 print("ValueError occured in sample generation - Regenerating sample.")
@@ -316,6 +365,9 @@ if __name__ == "__main__":
     if args.num_samples is not None:
         cfg.nr_samples = args.num_samples
 
+    # seed the global numpy RNG, which drives every per-sample draw.
+    np.random.seed(cfg.seed)
+
     logging.info(f"Generating dataset with {cfg.nr_samples} samples.")
 
     # Load and configure the scene --------------------------------------------------------------------
@@ -379,4 +431,4 @@ if __name__ == "__main__":
         cfg.idx_first_sc = idx_first_sc
         cfg.p_noise_dbm = p_noise_dbm
 
-    generate_dataset(cfg, scene)
+    generate_dataset(cfg, scene, su_coordinates)

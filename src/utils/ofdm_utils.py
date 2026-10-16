@@ -13,72 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import interp1d
 import scipy.signal as scsig
+from sionna.phy.mapping import Mapper as ConstellationMapper
 import seaborn as sns
-
-# define constellations
-BPSK_SYMBOLS = [-1, 1]
-QPSK_SYMBOLS = [-1 - 1j, -1 + 1j, 1 - 1j, 1 + 1j]
-QAM16_SYMBOLS = [
-    -3 - 3j,
-    -3 - 1j,
-    -3 + 3j,
-    -3 + 1j,
-    -1 - 3j,
-    -1 - 1j,
-    -1 + 3j,
-    -1 + 1j,
-    3 - 3j,
-    3 - 1j,
-    3 + 3j,
-    3 + 1j,
-    1 - 3j,
-    1 - 1j,
-    1 + 3j,
-    1 + 1j,
-]
-
-
-def constellation_mapping(in_sig, m):
-    """Maps an array of bits to constellation symbols.
-
-    Parameters
-    ----------
-    in_sig : np.array
-        Input bits, i.e., a numpy array containing 0 and 1.
-    m : int
-        Number of bits per symbol.
-
-    Returns
-    -------
-    mapped_symbols : np.array
-        Mapped symbols.
-    """
-
-    if m == 1:
-        constellation = BPSK_SYMBOLS
-    elif m == 2:
-        constellation = QPSK_SYMBOLS
-    elif m == 4:
-        constellation = QAM16_SYMBOLS
-    else:
-        raise ValueError("Constellation not implemented.")
-
-    # normalize constellation diagram for uniform power
-    constellation = constellation / np.sqrt(np.mean(np.abs(constellation) ** 2))
-
-    mapped_symbols = np.zeros(np.ceil(len(in_sig) / m).astype(int), dtype=complex)
-
-    in_sig_str = "".join(in_sig.astype(str))
-
-    dec_sig = np.zeros_like(mapped_symbols, dtype=int)
-
-    for i in range(0, len(in_sig), m):
-        dec_sig[i // m] = int(in_sig_str[i : i + m], 2)
-
-    for i in range(len(dec_sig)):
-        mapped_symbols[i] = constellation[dec_sig[i]]
-
-    return mapped_symbols
 
 
 def allocate_resources(num_tx, num_rb, num_slots, plot_allocation=False):
@@ -213,7 +149,9 @@ def upsample_rb_to_re(rb, n_subcarriers_per_rb, n_symbols_per_rb):
     return re
 
 
-def get_total_allocated_resources(sample, subcarriers_per_rb, symbols_per_slot, return_binary=True):
+def get_total_allocated_resources(
+    sample, subcarriers_per_rb, symbols_per_slot, return_binary=True
+):
     """Get the total allocated resources for all transmitters in the sample.
 
     Parameters
@@ -238,10 +176,12 @@ def get_total_allocated_resources(sample, subcarriers_per_rb, symbols_per_slot, 
     """
     # find all allocated resource  blocks for filtering
     total_allocated_resources = np.zeros_like(
-        sample.transmitters[0].resources, dtype=np.int
+        sample.transmitters[0].resources, dtype=np.int8
     )
     for tx_id, tx in enumerate(sample.transmitters):
-        total_allocated_resources = total_allocated_resources + tx.resources * (tx_id + 1)
+        total_allocated_resources = total_allocated_resources + tx.resources * (
+            tx_id + 1
+        )
 
     if return_binary:
         total_allocated_resources = total_allocated_resources > 0
@@ -284,7 +224,9 @@ def generate_user_signal_freq(
     n_bits = allocated_resources.sum() * sc_per_rb * sym_per_slot * bits_per_symbol
 
     bits_in = np.random.randint(0, 2, int(n_bits))
-    symbols = constellation_mapping(bits_in, bits_per_symbol)
+
+    mapper = ConstellationMapper("qam", bits_per_symbol)
+    symbols = mapper(bits_in)
 
     # distribute the symbols on the allocated resource elements
     allocated_resource_elements = upsample_rb_to_re(
@@ -493,7 +435,9 @@ def generate_deceptive_jammer_signal(
     )
 
     bits_in = np.random.randint(0, 2, int(n_bits))
-    symbols = constellation_mapping(bits_in, bits_per_symbols)
+
+    mapper = ConstellationMapper("qam", bits_per_symbols)
+    symbols = mapper(bits_in)
 
     # distribute the symbols on the allocated resource elements
     allocated_resource_elements = upsample_rb_to_re(
@@ -583,7 +527,7 @@ def generate_sweep_jammer_signal(num_sc, num_symbols, subcarriers_per_rb, nfft, 
     return jammer_signal_freq, False
 
 
-def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
+def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, nfft, cp_len):
     """Generate a random hopping jammer signal which transmits a
     tone (sine signal) on a randomly hopping center frequency.
     Additionally, the jammer has a certain duty cycle, i.e., it is
@@ -595,6 +539,8 @@ def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
         Number of subcarriers.
     num_symbols : int
         Number of symbols.
+    nfft : int
+        FFT size, i.e. the length of one jammer block in samples (no CP).
     cp_len : int
         Length of the cyclic prefix.
 
@@ -608,8 +554,8 @@ def generate_random_hopping_tone_jammer_signal(num_sc, num_symbols, cp_len):
     """
 
     # the missing CP is compensated by adding additional OFDM symbols to match the
-    # required length of the time signal
-    num_symbols_jammer = num_symbols + int(np.ceil(cp_len * num_symbols / num_sc))
+    # required length of the time signal (blocks are nfft samples long)
+    num_symbols_jammer = num_symbols + int(np.ceil(cp_len * num_symbols / nfft))
 
     hop_cycle = np.random.randint(2, num_symbols_jammer)
     duty_cycle = np.random.uniform(0.2, 1)
@@ -671,7 +617,7 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
             cfg.n_slots,
             cfg.subcarriers_per_rb,
             cfg.symbols_per_slot,
-            cfg.bits_per_symbol,
+            np.random.choice(cfg.bits_per_symbol),
         )
     elif jammer_type == "sweep":
         jammer_signal, add_cp = generate_sweep_jammer_signal(
@@ -692,7 +638,7 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
         )
     elif jammer_type == "random_hop":
         jammer_signal, add_cp = generate_random_hopping_tone_jammer_signal(
-            cfg.num_subcarriers, cfg.n_slots * cfg.symbols_per_slot, cfg.cp_len
+            cfg.num_subcarriers, cfg.n_slots * cfg.symbols_per_slot, cfg.nfft, cfg.cp_len
         )
     else:
         raise ValueError(f"Jammer {jammer_type} type not implemented.")
@@ -700,7 +646,9 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
     return jammer_signal, add_cp
 
 
-def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
+def calc_complex_spectrogram(
+    sig, nfft, hop, window="blackmanharris", offset=0, num_cols=None
+):
     """Calculate the complex spectrogram of a signal.
 
     Parameters
@@ -713,6 +661,17 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
         Shift of the window per step.
     window : str
         Window function to use for the spectrogram.
+    offset : int
+        Sample index at which the first analysis window starts. Used to
+        model a SU's STFT timing offset against the OFDM symbol grid.
+        Default: 0 (grid-synchronous, as before).
+    num_cols : int, optional
+        Number of columns (analysis windows) to compute. If None, it is
+        derived from `len(sig)` and `offset` as before, i.e. as many
+        columns as fit. Explicitly fixing it (e.g. to a value below the
+        default) is what makes the offset applicable irrespective of its
+        actual per-SU value while keeping the image dimensions constant
+        across the dataset.
 
     Returns
     -------
@@ -723,12 +682,16 @@ def calc_complex_spectrogram(sig, nfft, hop, window="blackmanharris"):
     win = scsig.windows.get_window(window, nfft)
     win = win / np.sqrt(np.mean(win))  # normalize window to have unit energy
 
-    spec = np.ones((nfft, np.ceil(len(sig) / hop).astype(int)), dtype=complex) * np.nan
+    if num_cols is None:
+        num_cols = np.ceil((len(sig) - offset) / hop).astype(int)
 
-    for idx in range(0, len(sig) - nfft, hop):
-        spec[:, idx // hop] = np.fft.fft(
-            sig[idx : idx + nfft] * win, n=nfft, norm="ortho"
-        )
+    spec = np.ones((nfft, num_cols), dtype=complex) * np.nan
+
+    for col in range(num_cols):
+        idx = offset + col * hop
+        if idx + nfft > len(sig):
+            break
+        spec[:, col] = np.fft.fft(sig[idx : idx + nfft] * win, n=nfft, norm="ortho")
 
     if np.isnan(spec[0, -1]):
         # discard last column if it is not filled (if hop does not divide the signal length)
@@ -827,50 +790,6 @@ def crop_spectrogram_to_bandwidth(spec, idx_first_sc, num_sc):
     return spec[idx_first_sc : idx_first_sc + num_sc, :]
 
 
-def filter_spectrogram_by_allocated_res(
-    spec, total_allocated_resources, oob_suppression=-30, bounding_freq_only=False
-):
-    """Filter the spectrogram by the allocated resource elements.
-    Resource elements that are not allocated are set to zero.
-
-    Parameters
-    ----------
-    spec : np.ndarray
-        Spectrogram (in linear scale) to filter.
-    total_allocated_resources : np.ndarray
-        Array of allocated resources, where True indicates an allocated resource.
-    oob_suppression : float
-        Suppression level for out-of-band resource elements in dB.
-        Default: -30 dB.
-    bounding_freq_only : bool
-        If True, not per subcarrier is filtered, but the bounding box is applied.
-        This is required for  pilot jamming, where otherwise an extreme (and thereby unrealistic)
-        suppression of single subcarriers would be ACHIEVED.
-
-    Returns
-    -------
-    filtered_spec : np.ndarray
-        Filtered spectrogram.
-    """
-
-    oob_suppression_linear = 10 ** (oob_suppression / 10)
-
-    # create a mask which is True for the not allocated resource elements
-    # which shall be suppressed.
-    if bounding_freq_only:
-        start_idx = np.where(total_allocated_resources)[0].min()
-        end_idx = np.where(total_allocated_resources)[0].max() + 1
-        mask = np.ones_like(total_allocated_resources, dtype=bool)
-        mask[start_idx:end_idx] = False
-    else:
-        mask = ~total_allocated_resources.astype(bool)
-
-    # apply suppression
-    spec[mask] = spec[mask] * oob_suppression_linear
-
-    return spec
-
-
 def upsample_axis_of_2d_array(arr, new_dim, axis):
     """Upsample a 2D array along a specified axis using linear interpolation.
 
@@ -895,6 +814,79 @@ def upsample_axis_of_2d_array(arr, new_dim, axis):
     interp_func = interp1d(x_old, arr, kind="nearest", axis=axis)
 
     return interp_func(x_new)
+
+
+def jammer_mask_on_stft_grid(
+    jammer_signal_freq,
+    add_cp,
+    nfft,
+    cp_len,
+    num_cols,
+    offset=0,
+    window="blackmanharris",
+    min_energy_share=0.25,
+):
+    """Map the jammer's resource occupancy onto the columns of the STFT.
+
+    The jammer is generated as blocks in the frequency domain, which are
+    `nfft + cp_len` samples long if a CP is added and `nfft` samples long
+    otherwise. The STFT windows are `nfft` samples long and hop by
+    `nfft + cp_len`, so without a CP the block grid drifts against the window
+    grid (75 blocks over 70 columns) and a block can straddle two windows.
+    A block marks every column in which it contributes at least
+    `min_energy_share` of the analysis window's energy (default 1/4, i.e. its
+    resource elements are lifted to within 6 dB of a fully covered window).
+    With this threshold every block is marked in at least one column. With a
+    CP each window lies inside one block, so this is the identity mapping.
+
+    Parameters
+    ----------
+    jammer_signal_freq : np.ndarray
+        Jammer signal in frequency domain, shape (num_sc, num_blocks).
+    add_cp : bool
+        Whether a CP was added to each block when converting to time domain.
+    nfft : int
+        FFT size.
+    cp_len : int
+        Length of the cyclic prefix in samples.
+    num_cols : int
+        Number of STFT columns.
+    offset : int
+        Sample index at which the first analysis window starts. Default: 0,
+        i.e. the network-synchronous symbol grid.
+    window : str
+        STFT window, as in `calc_complex_spectrogram`.
+    min_energy_share : float
+        Minimum share of the window energy a block must contribute to mark
+        the column.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Boolean array of shape (num_sc, num_cols), True where the jammer
+        occupies the resource element.
+    """
+
+    block_len = nfft + cp_len if add_cp else nfft
+    num_blocks = jammer_signal_freq.shape[1]
+    occupied = jammer_signal_freq != 0
+
+    # cumulative window energy, to get the share of any sub-interval
+    win_energy = scsig.windows.get_window(window, nfft) ** 2
+    cum_energy = np.concatenate(([0.0], np.cumsum(win_energy))) / win_energy.sum()
+
+    mask = np.zeros((jammer_signal_freq.shape[0], num_cols), dtype=bool)
+    for col in range(num_cols):
+        start = offset + col * (nfft + cp_len)
+        for block in range(start // block_len, (start + nfft - 1) // block_len + 1):
+            if block >= num_blocks:
+                break
+            lo = max(block * block_len, start) - start
+            hi = min((block + 1) * block_len, start + nfft) - start
+            if cum_energy[hi] - cum_energy[lo] >= min_energy_share:
+                mask[:, col] |= occupied[:, block]
+
+    return mask
 
 
 def average_power_per_subcarrier(spec, allocated_resources_upsampled):

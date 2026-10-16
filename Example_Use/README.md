@@ -57,6 +57,25 @@ python src/train_unsupervised.py --data_path ".\Dataset" --Max_LR 1e-2 --initial
 
 
 The trained weights are provided in the `Example_Use/Weights` directory. 
+
+---
+
+# Threshold-based Baselines
+
+Three non-learned baselines are provided, which follow the evaluation protocol of the VAE (fitted only on normal samples of `split_unsupervised == "train"`, decision threshold at the 90th percentile of the normal validation scores, AUC and F1 per jammer type on the test split):
+
+* `src/threshold_energy.py`: global energy detector, mean received power over the grid per SU.
+* `src/threshold_re_map.py`: resource-element-wise threshold map, a high quantile of the normal power per SU and resource element.
+* `src/threshold_cfar.py`: 2D cell-averaging CFAR, local power ratio of every resource element to its surrounding.
+
+Each statistic is computed per SU, z-normalized per SU on held-out normal training samples and fused over the SUs (max and mean). Run, e.g.:
+
+```bash
+python src/threshold_energy.py --data_path ".\Dataset"
+```
+
+Run with `-h` for the detector parameters. Results (metrics, scores per sample, configuration) are written to a timestamped folder in `Example_Use/Results/threshold`. The shared loading, normalization and evaluation code is in `src/threshold_common.py`.
+
 You can use the jupyter notebooks provided to evaluate each method and visualise the detected anomalies for each sample.
 
 

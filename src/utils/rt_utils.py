@@ -24,10 +24,9 @@ from utils.ofdm_utils import (
     calc_complex_spectrogram,
     calc_spectrogram,
     crop_spectrogram_to_bandwidth,
-    upsample_rb_to_re,
-    filter_spectrogram_by_allocated_res,
-    upsample_axis_of_2d_array,
+    jammer_mask_on_stft_grid,
 )
+from utils import impairment_utils
 
 
 def calc_noise_power_dbm(bandwidth_hz, noise_figure_db=0, additional_impairments_db=0):
@@ -563,7 +562,7 @@ def h_to_cir(h, su_idx, tx_idx):
     )
 
 
-def create_spectrograms(sample, cfg, h, noise=False):
+def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
     """Create spectrograms for a sample with the given frequency response for each SU.
 
     Parameters
@@ -574,6 +573,10 @@ def create_spectrograms(sample, cfg, h, noise=False):
         Configuration object.
     h : np.ndarray
         Array of the complex channel frequency responses.
+    su_hardware : pd.DataFrame
+        Per-SU hardware impairment parameters, as returned by
+        `impairment_utils.generate_su_hardware_params`. Only read from if
+        the corresponding impairment is enabled in `cfg.impairments`.
     noise : bool, optional
         If True, the spectrogram is initialized with noise. Otherwise,
         the spectrogram is initialized with zeros (linear domain) and
@@ -583,8 +586,21 @@ def create_spectrograms(sample, cfg, h, noise=False):
     Returns
     -------
     sample : Sample
-        Updated sample object with spectrograms added.
+        Updated sample object with spectrograms added. In addition, the SNR and
+        SJR per SU, as well as the jammer occupancy, the local JSNR and the dB
+        contrast are stored in the sample. See the Sample class for details on
+        those metrics.
     """
+
+    # hardware impairments, gated on the master
+    # switch and their individual enabled flags
+    impairments_on = bool(cfg.impairments.enabled)
+    timing_offset_enabled = impairments_on and cfg.impairments.su_timing_offset.enabled
+    lo_offset_enabled = impairments_on and cfg.impairments.su_lo_freq_offset.enabled
+    dc_offset_enabled = impairments_on and cfg.impairments.rx_dc_offset.enabled
+    iq_imbalance_enabled = impairments_on and cfg.impairments.rx_iq_imbalance.enabled
+
+    sample_rate_hz = cfg.subcarrier_spacing * cfg.nfft
 
     # create the plain user signals, first in time domain
     # and then convert to frequency domain
@@ -597,7 +613,7 @@ def create_spectrograms(sample, cfg, h, noise=False):
             sample.transmitters[tx_idx].resources,
             cfg.subcarriers_per_rb,
             cfg.symbols_per_slot,
-            cfg.bits_per_symbol,
+            np.random.choice(cfg.bits_per_symbol),
         )
         # convert the user signal to time domain
         user_signal_time = freq_signal_to_time_signal(
@@ -612,10 +628,6 @@ def create_spectrograms(sample, cfg, h, noise=False):
         user_signals_time[tx_idx] = scale_time_signal_to_target_power(
             user_signal_time, cfg.tx_power
         )
-
-    # store allocated resources per transmitter, upsampled to match the
-    # number of time bins in the spectrogram
-    allocated_resources_upsampled = {}
 
     # if required, generate the jammer signal
     if len(sample.jammers) == 1:
@@ -678,90 +690,120 @@ def create_spectrograms(sample, cfg, h, noise=False):
 
         logging.debug(f"Creating spectrogram for SU{su_idx}.")
 
-        # initialize the empty time signal, either with zeros or with noise
-        time_signal = np.zeros(signal_len, dtype=complex)
+        # per-SU hardware impairment parameters/derived quantities for this
+        # sample. Fixed per SU, only computed/applied if enabled.
+        # Residual sub-CP timing error (5G-UE-grade sync). It is bounded
+        # well below the CP, so the full column count still fits and the image
+        # dimensions match the grid-synchronous baseline (num_cols=None -> the
+        # default 70 columns, no column dropped).
+        su_num_cols = None
+        if timing_offset_enabled:
+            su_timing_offset = int(su_hardware.loc[su_idx, "timing_offset_samples"])
+        else:
+            su_timing_offset = 0
 
+        if lo_offset_enabled:
+            su_delta_f_hz = (
+                su_hardware.loc[su_idx, "lo_freq_offset_ppm"] * 1e-6 * cfg.f_c
+            )
+            su_lo_rotation = impairment_utils.lo_frequency_rotation(
+                su_delta_f_hz, sample_rate_hz, signal_len
+            )
+
+        if iq_imbalance_enabled:
+            su_iq_alpha, su_iq_beta = impairment_utils.compute_iq_imbalance_coeffs(
+                su_hardware.loc[su_idx, "iq_gain_imbalance_db"],
+                su_hardware.loc[su_idx, "iq_phase_imbalance_deg"],
+            )
+
+        # --- legitimate signal -----------------------------------------------
+        # The SU antenna receives the sum of all transmitter signals as a
+        # single time-domain waveform; the spectrogram is computed once on that
+        # sum. The STFT is linear, so this is identical to the previous
+        # per-emitter spectrogram summation, while any per-emitter time-domain
+        # impairment still slots in before the sum.
+        signal_time = np.zeros(signal_len, dtype=complex)
         for tx_idx in range(len(sample.transmitters)):
 
-            # convert CFR to time domain and do convolution of signal with channel
+            # convert CFR to time domain and convolve the signal with the channel
             cir = h_to_cir(h, su_idx, tx_idx)
 
-            # print(f"pathloss: {10*np.log10(np.sum(np.abs(cir)**2))} dB")
+            # causal convolution, truncated to the original length. mode="same"
+            # must not be used here: the CIR has nfft taps, so it would recenter
+            # the output by nfft // 2 samples and thereby shift the signal by
+            # about half an OFDM symbol against the STFT window grid.
+            signal_time += scsig.convolve(user_signals_time[tx_idx], cir)[:signal_len]
 
-            user_signal_time = scsig.convolve(
-                user_signals_time[tx_idx], cir, mode="same"
-            )
-            user_signal_spec = calc_complex_spectrogram(
-                user_signal_time,
-                cfg.nfft,
-                cfg.nfft + cfg.cp_len,
-            )
-            user_signal_spec = crop_spectrogram_to_bandwidth(
-                user_signal_spec, cfg.idx_first_sc, cfg.num_subcarriers
-            )
+        if lo_offset_enabled:
+            signal_time = signal_time * su_lo_rotation
 
-            # when the SU is the first one, allocated resouces need to be
-            # upsampled to the actual number of time bins in the spectrogram
-            # this is used for filtering the user signals in time and frequency
-            if su_idx == 0:
-                allocated_resources = upsample_rb_to_re(
-                    sample.transmitters[tx_idx].resources,
-                    cfg.subcarriers_per_rb,
-                    cfg.symbols_per_slot,
-                )
-
-                allocated_resources_upsampled[tx_idx] = upsample_axis_of_2d_array(
-                    allocated_resources, user_signal_spec.shape[1], axis=1
-                )
-
-            user_signal_spec = filter_spectrogram_by_allocated_res(
-                user_signal_spec,
-                allocated_resources_upsampled[tx_idx],
-                cfg.oob_suppression,
+        if iq_imbalance_enabled:
+            signal_time = impairment_utils.apply_iq_imbalance(
+                signal_time, su_iq_alpha, su_iq_beta
             )
 
-            if tx_idx == 0:
-                total_spec = user_signal_spec
-            else:
-                total_spec += user_signal_spec
+        signal_spec = calc_complex_spectrogram(
+            signal_time,
+            cfg.nfft,
+            cfg.nfft + cfg.cp_len,
+            offset=su_timing_offset,
+            num_cols=su_num_cols,
+        )
+        signal_spec = crop_spectrogram_to_bandwidth(
+            signal_spec, cfg.idx_first_sc, cfg.num_subcarriers
+        )
 
-        signal_power = np.mean(np.sum(np.abs(total_spec) ** 2, axis=0))
+        signal_power = np.mean(np.sum(np.abs(signal_spec) ** 2, axis=0))
 
-        # add the jammer to the signal
+        # total received spectrogram; jammer and noise are added on top.
+        # signal_spec is kept as the jammer- and noise-free reference required
+        # to quantify the impact of the jammer on the spectrogram further below.
+        total_spec = signal_spec.copy()
+
+        # --- jammer ----------------------------------------------------------
         if len(sample.jammers) == 1:
 
             if su_idx == 0:
-                # get the filtering mask for the jammer signal
-                jammer_allocated_res = jammer_signal_freq != 0
-                jammer_resources_upsampled = upsample_axis_of_2d_array(
-                    jammer_allocated_res, user_signal_spec.shape[1], axis=1
+                # the resource elements occupied by the jammer are identical for
+                # all SUs, hence the occupancy is a sample level quantity. It is
+                # mapped onto the network-synchronous STFT grid by time (the
+                # per-SU sub-CP timing residual does not move a window centre
+                # across a block boundary by more than a few samples)
+                jammer_mask = jammer_mask_on_stft_grid(
+                    jammer_signal_freq,
+                    add_cp_for_jammer,
+                    cfg.nfft,
+                    cfg.cp_len,
+                    signal_spec.shape[1],
                 )
+                sample.jammer_occupancy = float(np.mean(jammer_mask))
 
             # assuming the channel of the jammer is the last one in the axis of the transmitters
             cir = h_to_cir(h, su_idx, -1)
 
             jammer_signal_time_after_channel = scsig.convolve(
-                jammer_signal_time, cir, mode="same"
-            )
+                jammer_signal_time, cir
+            )[:signal_len]
 
-            time_signal += jammer_signal_time_after_channel
+            if lo_offset_enabled:
+                jammer_signal_time_after_channel = (
+                    jammer_signal_time_after_channel * su_lo_rotation
+                )
+
+            if iq_imbalance_enabled:
+                jammer_signal_time_after_channel = impairment_utils.apply_iq_imbalance(
+                    jammer_signal_time_after_channel, su_iq_alpha, su_iq_beta
+                )
+
             jammer_spec = calc_complex_spectrogram(
                 jammer_signal_time_after_channel,
                 cfg.nfft,
                 cfg.nfft + cfg.cp_len,
+                offset=su_timing_offset,
+                num_cols=su_num_cols,
             )
             jammer_spec = crop_spectrogram_to_bandwidth(
                 jammer_spec, cfg.idx_first_sc, cfg.num_subcarriers
-            )
-
-            # for a pilot jammer, only the bounding frequencies are used
-            # to achieve realistic filtering
-            bounding_freq_only = sample.jammers[0].type == "pilot"
-            jammer_spec = filter_spectrogram_by_allocated_res(
-                jammer_spec,
-                jammer_resources_upsampled,
-                cfg.oob_suppression,
-                bounding_freq_only,
             )
 
             jammer_power = np.mean(np.sum(np.abs(jammer_spec) ** 2, axis=0))
@@ -774,15 +816,28 @@ def create_spectrograms(sample, cfg, h, noise=False):
         # add noise according to a specified SNR. The noise level relates to the weakest signal
         if noise:
             noise_signal = np.random.normal(
-                size=len(time_signal)
-            ) + 1j * np.random.normal(size=len(time_signal))
+                size=signal_len
+            ) + 1j * np.random.normal(size=signal_len)
             noise_signal = scale_time_signal_to_target_power(
                 noise_signal, cfg.p_noise_dbm
             )
+
+            if dc_offset_enabled:
+                # folded into the noise/background term rather than any
+                # signal or jammer component
+                noise_signal = impairment_utils.apply_dc_offset(
+                    noise_signal,
+                    cfg.nfft,
+                    su_hardware.loc[su_idx, "dc_offset_over_noise_db"],
+                    su_hardware.loc[su_idx, "dc_offset_phase_rad"],
+                )
+
             noise_spec = calc_complex_spectrogram(
                 noise_signal,
                 cfg.nfft,
                 cfg.nfft + cfg.cp_len,
+                offset=su_timing_offset,
+                num_cols=su_num_cols,
             )
             noise_spec = crop_spectrogram_to_bandwidth(
                 noise_spec, cfg.idx_first_sc, cfg.num_subcarriers
@@ -792,6 +847,43 @@ def create_spectrograms(sample, cfg, h, noise=False):
             sample.snr_by_su[su_idx] = 10 * np.log10(signal_power / noise_power)
 
             total_spec += noise_spec
+
+        # metrics describing how strongly the jammer stands out. In contrast to
+        # the SJR above, they are not diluted by a jammer that only occupies a
+        # small part of the time-frequency grid. They require both a jammer and
+        # noise to be present, otherwise they are not defined.
+        if len(sample.jammers) == 1 and noise:
+
+            # noise power per resource element. It is estimated over the full
+            # grid, so that the estimate is not distorted by the particular
+            # noise realization on a potentially very small jammer footprint.
+            noise_power_per_re = np.mean(np.abs(noise_spec) ** 2)
+
+            # signal and jammer power per resource element, but restricted to
+            # the resource elements the jammer occupies
+            signal_power_local = np.mean(np.abs(signal_spec[jammer_mask]) ** 2)
+            jammer_power_local = np.mean(np.abs(jammer_spec[jammer_mask]) ** 2)
+
+            sample.jsnr_local_by_su[su_idx] = 10 * np.log10(
+                jammer_power_local / (signal_power_local + noise_power_per_re)
+            )
+
+            # change of the spectrogram caused by the jammer, evaluated in the
+            # logarithmic domain the spectrogram images are provided in. Single
+            # resource elements can be attenuated by destructive interference,
+            # which is intended and hence not clipped.
+            db_contrast = 20 * np.log10(
+                np.abs(total_spec) / np.abs(signal_spec + noise_spec)
+            )
+
+            sample.db_contrast_global_by_su[su_idx] = float(np.mean(db_contrast))
+            sample.db_contrast_local_by_su[su_idx] = float(
+                np.mean(db_contrast[jammer_mask])
+            )
+        else:
+            sample.jsnr_local_by_su[su_idx] = np.nan
+            sample.db_contrast_global_by_su[su_idx] = np.nan
+            sample.db_contrast_local_by_su[su_idx] = np.nan
 
         spec_dBm = 20 * np.log10(np.abs(total_spec))
 
