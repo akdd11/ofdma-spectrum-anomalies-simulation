@@ -122,46 +122,36 @@ As a starting point, the notebook `notebooks/plot_spectrograms.ipynb` shows how 
 
 #### Spectrograms
 
-Below are example images of the generated spectrograms. Note, that the provided images are in grayscale, but are shown for better visibility here with a colorscale.
+Below are example spectrograms at one SU each: (a) normal operation and (b)-(f) one example per jammer type (samples 1, 14001, 12016, 18002, 10004, and 16020 at SUs 16, 15, 7, 20, 7, and 14). The red boxes mark the regions occupied by the jammer; the barrage jammer covers the entire grid. Note that the provided images are in grayscale, but are shown here with a color scale for better visibility.
 
-<table align="center" style="border: none;">
-  <tr>
-    <td align="center">
-      <img src="./assets/example_barrage_sample_14000_su_4.png" width="300"><br>
-      <b>Barrage Jammer</b>
-    </td>
-    <td align="center">
-      <img src="./assets/example_deceptive_sample_10000_su_2.png" width="300"><br>
-      <b>Deceptive Jammer</b>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="./assets/example_pilot_sample_16002_su_16.png" width="300"><br>
-      <b>Pilot Jammer</b>
-    </td>
-    <td align="center">
-      <img src="./assets/example_random_hop_sample_18001_su_16.png" width="300"><br>
-      <b>Random Hop Jammer</b>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <img src="./assets/example_sweep_sample_12006_su_19.png" width="300"><br>
-      <b>Sweep Jammer</b>
-    </td>
-  </tr>
-</table>
+Besides the jammers, the hardware impairments of the SUs are visible (see [Hardware impairments](#hardware-impairments)): the residual DC offset as a horizontal line at the center subcarrier (RB 55, e.g., in (a) and (d)), and the image caused by IQ imbalance for very strong signals, mirrored at the center frequency (in (f), the pilot jamming in RBs 3-25 is mirrored to RBs 84-107). The sweep and random hopping tone jammers are generated block-wise and not aligned to the OFDM symbol grid, hence they exhibit spectral splatter, visible as faint vertical stripes in (c) and (d).
+
+<p align="center">
+  <img src="./assets/example_spectrograms.png" width="800">
+</p>
 
 #### Resource Allocation
 
-The notebook `notebooks/plot_resource_allocation.png` shows how to load the resource allocation images. 
+The notebook `notebooks/plot_resource_allocation.ipynb` shows how to load the resource allocation images.
 
 **NOTE**: The resource allocation images are 8-bit PNG images, with the pixel value corresponding to the transmitter index (0: not allocated). Hence, the images seem almost completely black, but the information is still correctly contained in the images. For visualization below and in the paper, a discrete color scheme has been applied to highlight the allocations to the users.
 
+The example below shows the resource allocation of sample 10004, i.e., the sample of the deceptive jammer example (e) above. The deceptive jammer occupies RBs 73-89 in slots 0, 1, and 4, i.e., the unallocated RBs 73-81 and the lower part of the band of transmitter 7 (RBs 82-96).
+
 <p align="center">
-  <img src="./assets/resource_allocation_sample_12000.png" width="300">
+  <img src="./assets/resource_allocation_sample_10004.png" width="400">
 </p>
+
+
+### Paper figures
+
+The figures of the paper (SNR/SJR distribution, resource allocation, and example spectrograms) are generated from the dataset with
+
+```bash
+python src/plot_figures.py
+```
+
+and saved as PDF into the `figures` folder. Individual figures can be selected with `-f` (`snr_sjr`, `allocation`, `spectrograms`), another dataset with `-d`. The script only uses the published data, i.e., the figures can be reproduced from the downloaded dataset. The regions occupied by the jammers, which are highlighted in the example spectrograms, are not contained in the dataset; they are inferred from the spectrograms and resource allocation images (see `src/utils/jammer_footprint.py`).
 
 
 ### Documentation
