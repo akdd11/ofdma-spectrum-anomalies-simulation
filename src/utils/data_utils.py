@@ -35,7 +35,7 @@ def get_datapath(repo_name: str):
 
     Returns
     -------
-    datapath: str
+    datapath : str
         The path to the dataset directory.
     """
     module_path = __file__[: __file__.find(repo_name) + len(repo_name)]
@@ -67,13 +67,13 @@ def get_spectrogram_img_filenamename(sample_idx: int, su_idx: int):
     ----------
     sample_idx : int
         The index of the sample.
-    su_idx : int / str
+    su_idx : int or str
         The index of the SU (secondary user) in the sample.
         Instead of the number, a wildcard '*' can be used to create a regex pattern.
 
     Returns
     -------
-    filename: str
+    filename : str
         The filename for the spectrogram image.
     """
 
@@ -93,7 +93,7 @@ def get_resource_alloc_img_filenamename(sample_idx: int):
 
     Returns
     -------
-    filename: str
+    filename : str
         The filename for the resource allocation image.
     """
 
@@ -108,11 +108,21 @@ def load_allocations(
 ):
     """Load the resource allocation images from the dataset.
 
+    Parameters
+    ----------
+    dataset_path : str
+        The path to the dataset directory containing the ``images`` folder.
+    num_freqbins_aggr : int
+        The number of frequency bins which are aggregated. No aggregation
+        if 1.
+    num_timeslots_aggr : int
+        The number of time bins which are aggregated. No aggregation if 1.
+
     Returns
     -------
-    allocations: np.ndarray
+    allocations : np.ndarray
         The resource allocations as a numpy array with shape
-        (num_freq_bins, num_time_bins).
+        (num_samples, num_freq_bins, num_time_bins).
     """
 
     img_path = os.path.join(dataset_path, "images")
@@ -218,7 +228,7 @@ def aggregate_spectrograms(
     np.ndarray
         The aggregated spectrograms.
         Shape: (num_samples, [num_sus,] num_freq_bins // num_freqbins_aggr,
-                num_time_bins // num_timebins_aggr).
+        num_time_bins // num_timebins_aggr).
     """
 
     if len(spectrograms.shape) not in [3, 4]:
@@ -499,12 +509,12 @@ def downsample_spectrograms(
 
     Parameters
     ----------
-    spectrograms: np.ndarray
+    spectrograms : np.ndarray
         The spectrograms to downsample.
         Shape: (num_samples, num_sus, num_freq_bins, num_time_bins).
-    num_freq_bins_to_aggregate: int
+    num_freq_bins_to_aggregate : int
         The number of frequency bins to aggregate.
-    num_timesteps_to_aggregate: int
+    num_timesteps_to_aggregate : int
         The number of time bins to aggregate.
 
     Returns
@@ -512,7 +522,7 @@ def downsample_spectrograms(
     np.ndarray
         The downsampled spectrograms.
         Shape: (num_samples, num_sus, num_freq_bins // num_freq_bins_to_aggregate,
-                num_time_bins // num_timesteps_to_aggregate).
+        num_time_bins // num_timesteps_to_aggregate).
     """
 
     reshaped = spectrograms.reshape(
@@ -534,7 +544,7 @@ def jammer_types_to_binary(jammer_labels: np.ndarray) -> np.ndarray:
 
     Parameters
     ----------
-    jammer_labels: np.array
+    jammer_labels : np.array
         The jammer types (provided as a strings).
         No jammer present shall be indicated by 'None'.
         Every other type is interpreted as anomaly.

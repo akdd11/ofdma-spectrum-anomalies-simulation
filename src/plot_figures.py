@@ -110,7 +110,20 @@ class Dataset:
         self.num_su = len([c for c in self.labels.columns if c.startswith("snr_by_su_")])
 
     def load_spectrogram(self, sample_idx, su_idx):
-        """Spectrogram in dB (rescaled from the 8-bit image), shape (num_sc, num_symbols)"""
+        """Load a spectrogram in dB, rescaled from the 8-bit image.
+
+        Parameters
+        ----------
+        sample_idx : int
+            Index of the sample.
+        su_idx : int
+            Index of the SU.
+
+        Returns
+        -------
+        spectrogram : np.ndarray
+            Spectrogram in dB with shape (num_sc, num_symbols).
+        """
         img = Image.open(
             os.path.join(
                 self.datapath, "images", get_spectrogram_img_filenamename(sample_idx, su_idx)
@@ -119,7 +132,19 @@ class Dataset:
         return np.array(img) / 255.0 * (self.max_val - self.min_val) + self.min_val
 
     def load_allocation(self, sample_idx):
-        """Index of the legitimate transmitter per RE (0: unallocated)"""
+        """Load the resource allocation image of a sample.
+
+        Parameters
+        ----------
+        sample_idx : int
+            Index of the sample.
+
+        Returns
+        -------
+        allocation : np.ndarray
+            Index of the legitimate transmitter per RE (0: unallocated) with
+            shape (num_sc, num_symbols).
+        """
         img = Image.open(
             os.path.join(
                 self.datapath, "images", get_resource_alloc_img_filenamename(sample_idx)
@@ -128,7 +153,20 @@ class Dataset:
         return np.array(img)
 
     def per_su_values(self, measure):
-        """Finite values of a per SU measure (e.g., 'snr') over all samples and SUs."""
+        """Finite values of a per SU measure over all samples and SUs.
+
+        Parameters
+        ----------
+        measure : str
+            Prefix of the per SU label columns, e.g., 'snr' for the columns
+            `snr_by_su_<j>`.
+
+        Returns
+        -------
+        values : np.ndarray
+            Flattened finite values. Infinite values (e.g., the SJR of samples
+            without jammer) are dropped.
+        """
         values = self.labels[[f"{measure}_by_su_{j}" for j in range(self.num_su)]].values.ravel()
         values = values.astype(float)
         # inf for the SJR of samples without jammer
@@ -136,7 +174,18 @@ class Dataset:
 
 
 def upsample_for_pdf(img):
-    """Repeat each RE, see UPSAMPLE_SC and UPSAMPLE_SYM."""
+    """Repeat each RE, see UPSAMPLE_SC and UPSAMPLE_SYM.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Image with shape (num_sc, num_symbols).
+
+    Returns
+    -------
+    upsampled : np.ndarray
+        Image with shape (num_sc * UPSAMPLE_SC, num_symbols * UPSAMPLE_SYM).
+    """
     return np.repeat(np.repeat(img, UPSAMPLE_SC, axis=0), UPSAMPLE_SYM, axis=1)
 
 
@@ -175,7 +224,18 @@ def save_figure(fig, filename, num_images=0, min_shape=None, png_filename=None):
 
 
 def plot_snr_sjr_distribution(dataset, figure_path, assets_path):
-    """Empirical distribution of the SNR and SJR over all spectrograms."""
+    """Empirical distribution of the SNR and SJR over all spectrograms.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset to plot.
+    figure_path : str
+        Folder the PDF is saved to.
+    assets_path : str
+        Unused, since the figure is not shown in the README. Only for the
+        common signature of the functions in `FIGURES`.
+    """
     snr_values = dataset.per_su_values("snr")
     sjr_values = dataset.per_su_values("sjr")
     print(f"Mean SNR: {np.mean(snr_values):.2f} dB, Std SNR: {np.std(snr_values):.2f} dB")
@@ -231,6 +291,17 @@ def plot_resource_allocation(dataset, figure_path, assets_path, sample_idx=ALLOC
 
     The allocation is constant per RB and slot, hence it is drawn as vector
     rectangles instead of an image, which PDF viewers would interpolate.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset to plot.
+    figure_path : str
+        Folder the PDF is saved to.
+    assets_path : str
+        Folder the PNG for the README is saved to.
+    sample_idx : int
+        Index of the sample. Default: the sample of the deceptive example.
     """
     sc_per_rb = dataset.cfg["subcarriers_per_rb"]
     sym_per_slot = dataset.cfg["symbols_per_slot"]
@@ -279,7 +350,20 @@ def plot_resource_allocation(dataset, figure_path, assets_path, sample_idx=ALLOC
 
 
 def plot_example_spectrograms(dataset, figure_path, assets_path, examples=EXAMPLES):
-    """One example spectrogram per jammer type, jammed regions highlighted."""
+    """One example spectrogram per jammer type, jammed regions highlighted.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The dataset to plot.
+    figure_path : str
+        Folder the PDF is saved to.
+    assets_path : str
+        Folder the PNG for the README is saved to.
+    examples : dict
+        (sample index, SU index) per jammer type, one panel each.
+        Default: `EXAMPLES`.
+    """
     labels = dataset.labels
     sc_per_rb = dataset.cfg["subcarriers_per_rb"]
     sym_per_slot = dataset.cfg["symbols_per_slot"]

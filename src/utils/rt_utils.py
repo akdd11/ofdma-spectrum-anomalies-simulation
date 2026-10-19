@@ -191,17 +191,17 @@ def get_random_tx_location(scene_nr, scene_size, tx_height=1.5, **kwargs):
     tx_height : float, optional
         Height of the transmitter from the ground.
         Default: 1.5.
-    **kwargs : dict
-        Additional keyword arguments.
-        - su_coordinates : np.array, optional
-            List of sensing unit coordinates (list of 3D coordinates).
-            To avoid unrealistic ray tracing results by placing the
-            transmitter too close to the SU, a minimum distance between
-            the transmitter and the SU is ensured to be kept if specified.
-        - min_dist_to_su : float, optional
-            Minimum distance between the transmitter and the closest
-            sensing unit in meters.
-            Default: 1.0.
+
+    Keyword Arguments
+    -----------------
+    su_coordinates : np.array, optional
+        List of sensing unit coordinates (list of 3D coordinates).
+        To avoid unrealistic ray tracing results by placing the
+        transmitter too close to the SU, a minimum distance between
+        the transmitter and the SU is ensured to be kept if specified.
+    min_dist_to_su : float, optional
+        Minimum distance between the transmitter and the closest
+        sensing unit in meters. Required if `su_coordinates` is given.
 
     Returns
     -------

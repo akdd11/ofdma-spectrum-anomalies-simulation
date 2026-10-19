@@ -586,10 +586,13 @@ def generate_jammer_signal_freq(jammer_type, cfg, **kwargs):
         Type of the jammer.
     cfg : dict
         Configuration dictionary.
-    (optional) allocated_resources : dict
+
+    Keyword Arguments
+    -----------------
+    allocated_resources : dict, optional
         Dictionary containing the allocated resources for each
         authorized transmitter. Required for pilot jammer.
-    (optional) num_tx : int
+    num_tx : int, optional
         Number of transmitters. Required for deceptive jammer.
 
     Returns
@@ -721,11 +724,9 @@ def calc_spectrogram(
         Number of FFT points.
     hop : int
         Shift of the window per step.
-    fs : int
-        Sampling frequency.
     dynamic_range : float
         Dynamic range in dB for clipping the spectrogram.
-        Default: -50 dB.
+        Default: 50 dB.
         The low power values are clipped to this value below the maximum value.
         Should be only applied for plotting.
     window : str

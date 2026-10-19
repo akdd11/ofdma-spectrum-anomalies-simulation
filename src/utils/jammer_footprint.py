@@ -20,7 +20,23 @@ from scipy import ndimage
 
 
 def to_blocks(arr, sc_per_rb, sym_per_slot):
-    """Reshape (num_sc, num_symbols) to (num_rb, num_slots, REs per RB and slot)."""
+    """Reshape (num_sc, num_symbols) to (num_rb, num_slots, REs per RB and slot).
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array with shape (num_sc, num_symbols), e.g., a spectrogram or a
+        resource allocation image.
+    sc_per_rb : int
+        Number of SCs per RB.
+    sym_per_slot : int
+        Number of OFDM symbols per slot.
+
+    Returns
+    -------
+    blocks : np.ndarray
+        Array with shape (num_rb, num_slots, sc_per_rb * sym_per_slot).
+    """
     num_sc, num_sym = arr.shape
     num_rb, num_slots = num_sc // sc_per_rb, num_sym // sym_per_slot
     return (
@@ -34,6 +50,16 @@ def regions_to_boxes(mask):
     """Bounding boxes of the connected regions of a mask.
 
     Gaps of one SC (comb of the pilot jammer) are bridged.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Boolean mask with shape (num_sc, num_symbols).
+
+    Returns
+    -------
+    boxes : list
+        Boxes (row0, row1, col0, col1), one per connected region.
     """
     lbl, _ = ndimage.label(ndimage.binary_dilation(mask, structure=np.ones((3, 1))))
     return [

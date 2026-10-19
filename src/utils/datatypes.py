@@ -21,9 +21,9 @@ class Transmitter:
 
         Parameters
         ----------
-        location: tuple
+        location : tuple
             The location of the transmitter (x,y,z).
-        resources: np.ndarray
+        resources : np.ndarray
             Boolean array of resources assigned to the transmitter (RBs).
         """
         self.location = location
@@ -49,16 +49,16 @@ class Jammer:
 
         Parameters
         ----------
-        location: tuple
+        location : tuple
             The location of the jammer (x,y,z).
-        orientation: tuple
+        orientation : tuple
             The orientation of the jammer, corresponding to roatation around
             z, y, and x axis in radians.
-        transmit_power: float
+        transmit_power : float
             The transmit power of the jammer.
-        type: str
+        type : str
             The jammer type (e.g., barrage, sweep, deceptive).
-        antenna_pattern: str
+        antenna_pattern : str
             Name of the antenna pattern used by the jammer.
         """
         self.location = location
@@ -75,35 +75,35 @@ class Sample:
 
     Particularly it contains spectrograms for each SU.
 
-    Parameters
+    Attributes
     ----------
-    transmitters: list
+    transmitters : list
         List of Transmitter objects.
-    jammers: list
+    jammers : list
         List of Jammer objects.
-    spectrograms: dict
+    spectrograms : dict
         Dictionary containing the spectrogram of each SU.
         The spectrogram only contains the magnitude in logarithmic domain,
-        i .e., it is real-valued and the unit is dBm.
-    sjr_by_su: dict
+        i.e., it is real-valued and the unit is dBm.
+    sjr_by_su : dict
         Signal-to-jammer ratio per SU in dB, averaged over the whole
         time-frequency grid.
-    snr_by_su: dict
+    snr_by_su : dict
         Signal-to-noise ratio per SU in dB, averaged over the whole
         time-frequency grid.
-    jammer_occupancy: float
+    jammer_occupancy : float
         Fraction of the resource elements of the time-frequency grid that are
         occupied by the jammer. The jammer footprint does not depend on the SU,
         hence this is a sample level quantity. NaN if there is no jammer.
-    jsnr_local_by_su: dict
+    jsnr_local_by_su : dict
         Jammer-to-signal-plus-noise ratio per SU in dB, evaluated only on the
         resource elements occupied by the jammer. Positive values indicate that
         the jammer dominates its own footprint.
-    db_contrast_global_by_su: dict
+    db_contrast_global_by_su : dict
         Mean change of the spectrogram in dB caused by the jammer, averaged
         over all resource elements. This corresponds to a mean pooled anomaly
         score, i.e., a sparse jammer is diluted in the same way.
-    db_contrast_local_by_su: dict
+    db_contrast_local_by_su : dict
         Mean change of the spectrogram in dB caused by the jammer, averaged
         only over the resource elements occupied by the jammer.
     """
@@ -130,7 +130,7 @@ class Sample:
 
         Parameters
         ----------
-        transmitter: Transmitter
+        transmitter : Transmitter
             The transmitter to be added.
         """
 
@@ -142,7 +142,7 @@ class Sample:
 
         Parameters
         ----------
-        jammer: Jammer
+        jammer : Jammer
             The jammer to be added.
         """
 
@@ -154,9 +154,9 @@ class Sample:
 
         Parameters
         ----------
-        su_idx: int
+        su_idx : int
             The index of the SU.
-        spectrogram: np.ndarray
+        spectrogram : np.ndarray
             The spectrogram of the SU.
             Saved as float32 to reduce memory usage.
         """
@@ -169,15 +169,15 @@ class Sample:
 
         Parameters
         ----------
-        su_idx: int
+        su_idx : int
             The name of the SU.
-        cbar: bool
+        cbar : bool
             Whether to show the colorbar or not.
-        vmin: float
+        vmin : float
             The minimum value for the colorbar.
-        vmax: float
+        vmax : float
             The maximum value for the colorbar.
-        ax: matplotlib.axes.Axes
+        ax : matplotlib.axes.Axes
             The axes to plot the spectrogram on. Only if several spectrograms shall
             be plotted in the same figure.
         """
