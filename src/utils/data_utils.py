@@ -61,7 +61,7 @@ def get_datapath(repo_name: str):
 
 
 def get_spectrogram_img_filenamename(sample_idx: int, su_idx: int):
-    """Generate the filename for a spectrogram image based on the mode, sample index and SU index.
+    """Generate the filename for a spectrogram image based on the sample index and SU index.
 
     Parameters
     ----------
@@ -117,7 +117,10 @@ def load_allocations(
 
     img_path = os.path.join(dataset_path, "images")
 
-    file_list = glob(os.path.join(img_path, get_resource_alloc_img_filenamename("*")))
+    # sorted, so that the position in the returned array is the sample index
+    file_list = sorted(
+        glob(os.path.join(img_path, get_resource_alloc_img_filenamename("*")))
+    )
 
     for sample_idx, file_name in enumerate(file_list):
 
@@ -138,36 +141,35 @@ def load_allocations(
 
 
 def load_one_sample_from_images(
-    img_path: str, mode: str, sample_idx: int, aggregation: str = "mean"
+    img_path: str, sample_idx: int, aggregation: str = "mean"
 ) -> np.ndarray:
     """Load a single sample from the images.
 
     Parameters
     ----------
-    mode : str
-        The mode of the sample, i.e., 'PT' or 'DT'.
+    img_path : str
+        The path to the directory containing the spectrogram images.
     sample_idx : int
         The index of the sample.
     aggregation : str
-        The aggregation method to use for the spectrograms.
-        Currently only 'mean' is supported.
+        The aggregation method to use to combine the spectrograms of the
+        different sensing units. Either 'mean' or 'none'.
 
     Returns
     -------
     spectrograms : np.ndarray
-        The aggregated spectrograms of the sample as a numpy array.
+        The spectrograms of the sample as a numpy array. Shape
+        (num_freq_bins, num_time_bins) for 'mean', or
+        (num_sus, num_freq_bins, num_time_bins) for 'none'.
     """
-
-    if mode not in ["PT", "DT"]:
-        raise ValueError(f"Mode {mode} is not supported. Use 'PT' or 'DT'.")
 
     if aggregation not in ["mean", "none"]:
         raise NotImplementedError(
-            f"Aggregation method {aggregation} is not implemented. Only 'mean' or None are supported."
+            f"Aggregation method {aggregation} is not implemented. Only 'mean' or 'none' are supported."
         )
 
-    file_list = glob(
-        os.path.join(img_path, get_spectrogram_img_filenamename(mode, sample_idx, "*"))
+    file_list = sorted(
+        glob(os.path.join(img_path, get_spectrogram_img_filenamename(sample_idx, "*")))
     )
 
     for su_idx, filename in enumerate(file_list):
@@ -265,7 +267,6 @@ def load_dataset(
     aggregation_su: str,
     num_freqbins_aggr: int,
     num_timeslots_aggr: int,
-    load_dt_spectrograms: bool = True,
     verbose: int = 0,
     batch_size: int = 100,
 ) -> tuple:
@@ -284,8 +285,6 @@ def load_dataset(
     num_timeslots_aggr : int
         The number of time bins to aggregate. Aggregation is done by averaging
         in the linear domain.
-    load_dt_spectrograms : bool
-        Whether to load and return the DT spectrograms.
     verbose : int
         The verbosity level for progress report. Default is 0.
     batch_size : int
@@ -295,13 +294,9 @@ def load_dataset(
     -------
     labels_df : pd.DataFrame
         The labels of the dataset as a pandas DataFrame.
-    pt_spectrograms : np.ndarray
-        The spectrograms of the PT samples as a numpy array with
+    spectrograms : np.ndarray
+        The spectrograms of the samples as a numpy array with
         shape (num_samples, num_freq_bins, num_time_bins).
-    dt_spectrograms : np.ndarray
-        The spectrograms of the DT samples as a numpy array with
-        shape (num_samples, num_freq_bins, num_time_bins).
-        Only returned if `load_dt_spectrograms` is True.
     """
 
     img_path = os.path.join(datapath, "images")
@@ -318,11 +313,11 @@ def load_dataset(
         print(f"\nSpectrogram value range: {v_min} to {v_max}")
         print(f"Loading spectrograms...", end=" ")
 
-    def load_spectrograms_batch(mode, start_idx, end_idx):
-        """Load a batch of spectrograms for the given mode and sample range."""
+    def load_spectrograms_batch(start_idx, end_idx):
+        """Load a batch of spectrograms for the given sample range."""
         # Get shape from the first sample in the batch
         first_spectrogram = load_one_sample_from_images(
-            img_path, mode, start_idx, aggregation_su
+            img_path, start_idx, aggregation_su
         )
 
         batch_size_actual = end_idx - start_idx
@@ -333,7 +328,7 @@ def load_dataset(
 
         for i, sample_idx in enumerate(range(start_idx + 1, end_idx)):
             spectrogram = load_one_sample_from_images(
-                img_path, mode, sample_idx, aggregation_su
+                img_path, sample_idx, aggregation_su
             )
             batch_spectrograms[i + 1] = spectrogram
 
@@ -349,48 +344,28 @@ def load_dataset(
 
         return batch_spectrograms
 
-    def load_spectrograms(mode):
-        """Load all spectrograms for a given mode using parallel batches."""
-        num_samples = labels_df.shape[0]
+    num_samples = labels_df.shape[0]
 
-        # Create batch indices
-        batch_starts = list(range(0, num_samples, batch_size))
-        batch_ends = [min(start + batch_size, num_samples) for start in batch_starts]
+    # Create batch indices
+    batch_starts = list(range(0, num_samples, batch_size))
+    batch_ends = [min(start + batch_size, num_samples) for start in batch_starts]
 
-        if verbose > 0:
-            print(
-                f"Loading {mode} spectrograms in {len(batch_starts)} batches...",
-                end=" ",
-            )
+    if verbose > 0:
+        print(f"{len(batch_starts)} batches...", end=" ")
 
-        # Load batches in parallel
-        batch_results = Parallel(verbose=int(10 * verbose), n_jobs=4)(
-            delayed(load_spectrograms_batch)(mode, start, end)
-            for start, end in zip(batch_starts, batch_ends)
-        )
+    # Load batches in parallel
+    batch_results = Parallel(verbose=int(10 * verbose), n_jobs=4)(
+        delayed(load_spectrograms_batch)(start, end)
+        for start, end in zip(batch_starts, batch_ends)
+    )
 
-        # Concatenate all batches
-        spectrograms = np.concatenate(batch_results, axis=0)
-
-        if verbose > 0:
-            print("DONE.")
-
-        return spectrograms
-
-    # Load PT spectrograms
-    pt_spectrograms = load_spectrograms("PT")
-
-    # Load DT spectrograms if requested
-    if load_dt_spectrograms:
-        dt_spectrograms = load_spectrograms("DT")
+    # Concatenate all batches
+    spectrograms = np.concatenate(batch_results, axis=0)
 
     if verbose > 0:
         print("done.")
 
-    if load_dt_spectrograms:
-        return labels_df, pt_spectrograms, dt_spectrograms
-    else:
-        return labels_df, pt_spectrograms
+    return labels_df, spectrograms
 
 
 def generate_dataset_splits(
@@ -451,7 +426,10 @@ def generate_dataset_splits(
     train_types = [t for t in anomaly_types if t not in left_out_types]
 
     # "no jammer": positional split, independent per protocol
-    for split_arr, cfg in ((split_supervised, supervised), (split_unsupervised, unsupervised)):
+    for split_arr, cfg in (
+        (split_supervised, supervised),
+        (split_unsupervised, unsupervised),
+    ):
         idxs = np.where(jammer_types == "no jammer")[0]
         n_train, n_valid, n_test = (
             cfg["num_train_normal"],
@@ -479,7 +457,9 @@ def generate_dataset_splits(
         idxs = np.where(jammer_types == jammer_type)[0]
         is_train_type = jammer_type in train_types
 
-        needed_supervised = (per_train + per_valid if is_train_type else 0) + per_test_supervised
+        needed_supervised = (
+            per_train + per_valid if is_train_type else 0
+        ) + per_test_supervised
         if needed_supervised > len(idxs):
             raise ValueError(
                 f"Not enough '{jammer_type}' samples ({len(idxs)}) to satisfy"
@@ -563,11 +543,51 @@ def jammer_types_to_binary(jammer_labels: np.ndarray) -> np.ndarray:
 
 if __name__ == "__main__":
 
-    dataset_idx = 0
+    dataset_idx = 2
+    sample_idx = 16000
 
-    datapath = get_datapath()
+    datapath = get_datapath("ofdma-spectrum-anomalies-simulation")
     labels_df = pd.read_csv(os.path.join(datapath, str(dataset_idx), "labels.csv"))
 
-    load_one_sample_from_images(
-        os.path.join(datapath, str(dataset_idx), "images"), "PT", 0, "none"
+    import matplotlib.pyplot as plt
+
+    spectrograms = load_one_sample_from_images(
+        os.path.join(datapath, str(dataset_idx), "images"), sample_idx, "none"
     )
+
+    # invert the 8-bit scaling back to dBm using the clipping bounds of the dataset
+    min_max_df = pd.read_csv(
+        os.path.join(datapath, str(dataset_idx), "spectrogram_min_max.csv")
+    )
+    v_min = min_max_df["min_val"].values[0]
+    v_max = min_max_df["max_val"].values[0]
+    spectrograms = v_min + spectrograms / 255 * (v_max - v_min)
+
+    # plot the spectrograms of all SUs with a shared color scale
+    num_sus = spectrograms.shape[0]
+    num_cols = int(np.ceil(np.sqrt(num_sus)))
+    num_rows = int(np.ceil(num_sus / num_cols))
+    fig, axs = plt.subplots(
+        num_rows, num_cols, figsize=(2.5 * num_cols, 2.5 * num_rows), squeeze=False
+    )
+    vmin, vmax = spectrograms.min(), spectrograms.max()
+
+    for su_idx, ax in enumerate(axs.flat):
+        if su_idx >= num_sus:
+            ax.axis("off")
+            continue
+        im = ax.imshow(
+            spectrograms[su_idx], aspect="auto", origin="lower", vmin=vmin, vmax=vmax
+        )
+        ax.set_title(f"SU {su_idx}", fontsize=9)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.colorbar(im, ax=axs, label="Power [dBm]")
+    fig.supxlabel("Symbol")
+    fig.supylabel("Subcarrier")
+    fig.suptitle(
+        f"Dataset {dataset_idx}, sample {sample_idx}: "
+        f"{labels_df.loc[sample_idx, 'jammer_type']}"
+    )
+    plt.show()

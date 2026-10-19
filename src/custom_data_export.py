@@ -9,10 +9,11 @@ differently on disk.
 Spectrograms are clipped to a percentile-based value range (see
 `compute_clipping_values`) before being scaled to 8 bit, so that the
 limited 8-bit resolution is not dominated by rare outlier values. In addition,
-it generates a labels file containing the jammer type, and the number of
-legitimate transmitters for each sample. Also, a metadata file containing the
-clipping bounds of the spectrograms is generated to enable rescaling of the
-spectrograms back to their original values.
+it generates a labels file containing, for each sample, the jammer type, power
+and location, the number of legitimate transmitters, the per-SU SNR, SJR and
+jammer impact metrics, and the train/valid/test split assignments. Also, a
+metadata file containing the clipping bounds of the spectrograms is generated
+to enable rescaling of the spectrograms back to their original values.
 """
 
 __docformat__ = "numpy"
@@ -269,8 +270,6 @@ def samples_to_imgs_and_labels(
     labels : dict
         Updated dictionary containing the labels (jammer type,
         jammer power, number of legitimate transmitters).
-        Only updated for PT type samples! For DT type samples, the
-        it is returned as is.
     """
 
     filename = os.path.join(
@@ -569,10 +568,13 @@ if __name__ == "__main__":
     labels.update({metric_name: {} for metric_name in PER_SU_METRICS})
 
     custom_files_dir = os.path.join(_datapath, f"{dataset_nr}", "custom")
-    filenames = glob(
-        os.path.join(
-            custom_files_dir,
-            f"samples-*.pkl",
+    # sorted to prevent  glob returning files in arbitrary (file system dependent) order
+    filenames = sorted(
+        glob(
+            os.path.join(
+                custom_files_dir,
+                f"samples-*.pkl",
+            )
         )
     )
 
@@ -592,11 +594,10 @@ if __name__ == "__main__":
 
     clip_min, clip_max = compute_clipping_values(filenames)
 
-    # Save the clipping bounds (columns are still named min_val/max_val for
+    # Save the clipping bounds (named min_val/max_val for
     # backwards compatibility with existing readers of this file, e.g.
     # `load_dataset` in `src/utils/data_utils.py`) so that the clipped/rescaled
-    # values can be restored. See the README for details on how these bounds
-    # are derived.
+    # values can be restored.
     pd.DataFrame({"min_val": [clip_min], "max_val": [clip_max]}).to_csv(
         os.path.join(_datapath, f"{dataset_nr}", "spectrogram_min_max.csv"),
         index=False,
