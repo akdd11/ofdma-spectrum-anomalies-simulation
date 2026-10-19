@@ -58,6 +58,27 @@ PER_SU_METRICS = [
     "db_contrast_local_by_su",
 ]
 
+# columns for the jammer location in the labels file
+JAMMER_LOCATION_COLUMNS = ["jammer_x", "jammer_y", "jammer_z"]
+
+
+def append_jammer_location(labels, location):
+    """Append the jammer location to the labels, one column per coordinate.
+
+    Parameters
+    ----------
+    labels : dict
+        Dictionary containing the labels.
+    location : array_like or None
+        The location of the jammer (x,y,z). If None (no jammer), NaN is
+        appended for all coordinates.
+    """
+    if location is None:
+        location = [np.nan] * len(JAMMER_LOCATION_COLUMNS)
+    for column, coordinate in zip(JAMMER_LOCATION_COLUMNS, location):
+        labels[column].append(float(coordinate))
+
+
 # Percentiles used to derive the clipping range for the 8-bit PNG conversion.
 # The lower bound is taken from the distribution of all spectrogram values
 # (jammed and non-jammed), the upper bound only from jammed samples, since
@@ -289,11 +310,11 @@ def samples_to_imgs_and_labels(
         if len(sample.jammers) > 0:
             labels["jammer_type"].append(sample.jammers[0].type)
             labels["jammer_power"].append(sample.jammers[0].transmit_power)
-            labels["jammer_location"].append(sample.jammers[0].location)
+            append_jammer_location(labels, sample.jammers[0].location)
         else:
             labels["jammer_type"].append("no jammer")
             labels["jammer_power"].append(np.nan)
-            labels["jammer_location"].append(np.nan)
+            append_jammer_location(labels, None)
         labels["num_legitimate_transmitters"].append(len(sample.transmitters))
         labels["jammer_occupancy"].append(getattr(sample, "jammer_occupancy", np.nan))
 
@@ -424,11 +445,11 @@ def samples_to_hdf5_and_labels(
         if len(sample.jammers) > 0:
             labels["jammer_type"].append(sample.jammers[0].type)
             labels["jammer_power"].append(sample.jammers[0].transmit_power)
-            labels["jammer_location"].append(sample.jammers[0].location)
+            append_jammer_location(labels, sample.jammers[0].location)
         else:
             labels["jammer_type"].append("no jammer")
             labels["jammer_power"].append(np.nan)
-            labels["jammer_location"].append(np.nan)
+            append_jammer_location(labels, None)
         labels["num_legitimate_transmitters"].append(len(sample.transmitters))
         labels["jammer_occupancy"].append(getattr(sample, "jammer_occupancy", np.nan))
 
@@ -561,7 +582,7 @@ if __name__ == "__main__":
     labels = {
         "jammer_type": [],
         "jammer_power": [],
-        "jammer_location": [],
+        **{column: [] for column in JAMMER_LOCATION_COLUMNS},
         "num_legitimate_transmitters": [],
         "jammer_occupancy": [],
     }

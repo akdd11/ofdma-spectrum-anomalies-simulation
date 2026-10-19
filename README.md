@@ -79,7 +79,7 @@ Both datasets are gzip-compressed and hold the exact same per-sample data as the
 In addition, in the same directory, a file named `labels.csv` is created, which contains the following labels for each sample:
 * `jammer_type`: Type of the jammer (if there is no jammer, the value is "no jammer").
 * `jammer_power`: Transmit power of the jammer in dBm (if there is no jammer, the value is NaN).
-* `jammer_location`: Location of the jammer (if there is no jammer, the value is NaN).
+* `jammer_x`, `jammer_y`, `jammer_z`: Location of the jammer in the scene coordinate system in m, one column per coordinate (if there is no jammer, the values are NaN).
 * `num_legitimate_transmitters`: Number of legitimate transmitters in the scene.
 * `snr_by_su_<su_idx>`: Signal-to-noise ratio (SNR) at each sensing unit (SU) in dB.
 * `sjr_by_su_<su_idx>`: Signal-to-jammer ratio (SJR) at each sensing unit (SU) in dB (`inf` if there is no jammer, since the jammer power is then zero).
