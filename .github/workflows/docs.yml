@@ -1,0 +1,55 @@
+# Builds the API documentation with pydoctor (configured in pydoctor.ini) and
+# publishes it to GitHub Pages. Pull requests only build the docs as a check,
+# deployment happens on pushes to main.
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # allows starting the workflow manually from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# only one deployment at a time, a newer push cancels the older run
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # pydoctor only parses the source, so the simulation dependencies
+      # (Sionna, TensorFlow, ...) are not needed
+      - name: Install pydoctor
+        run: pip install pydoctor==25.10.1
+
+      # fails on docstring errors; link warnings for external types are expected
+      # --use-hardlinks: copy index.html instead of creating a symlink to it
+      - name: Build documentation
+        run: pydoctor --use-hardlinks
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
