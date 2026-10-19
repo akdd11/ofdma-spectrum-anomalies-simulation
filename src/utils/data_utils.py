@@ -199,21 +199,26 @@ def aggregate_spectrograms(
     ----------
     spectrograms : np.ndarray
         The spectrograms to aggregate.
-        Shape: (num_samples, num_freq_bins, num_time_bins).
-    num_freq_bins_aggr : int
-        The number of frequency bins which are aggregated.
-    num_time_bins_aggr : int
-        The number of time bins which are aggregated.
+        Shape: (num_samples, num_freq_bins, num_time_bins) or
+        (num_samples, num_sus, num_freq_bins, num_time_bins).
+    num_freqbins_aggr : int
+        The number of frequency bins which are aggregated. The number of
+        frequency bins must be divisible by it.
+    num_timebins_aggr : int
+        The number of time bins which are aggregated. If the number of time
+        bins is not divisible by it, the trailing time bins are dropped.
     convert_from_log_to_lin_before : bool
-        Whether to convert the spectrograms from the logarithmic domain (dB) to the linear domain before aggregation.
-        Default is False, which means no conversion is done.
+        Whether the spectrograms are given in the logarithmic domain (dB) and
+        shall be averaged in the linear domain. If True, they are converted
+        to the linear domain before and back to dB after the aggregation.
+        Default is False, which means the values are averaged as they are.
 
     Returns
     -------
     np.ndarray
         The aggregated spectrograms.
-        Shape: (num_samples, num_freq_bins // num_freq_bins_to_aggregate,
-                num_time_bins // num_time_bins_to_aggregate).
+        Shape: (num_samples, [num_sus,] num_freq_bins // num_freqbins_aggr,
+                num_time_bins // num_timebins_aggr).
     """
 
     if len(spectrograms.shape) not in [3, 4]:
@@ -245,10 +250,9 @@ def aggregate_spectrograms(
                 f"will be truncated."
             )
             spectrograms = spectrograms[
-                :, :, : -(spectrograms.shape[time_axis] % num_timebins_aggr)
+                ..., : -(spectrograms.shape[time_axis] % num_timebins_aggr)
             ]
 
-        spectrograms = np.power(10, spectrograms / 10)  # convert dB to linear scale
         shape = list(spectrograms.shape)
         new_shape = shape[:time_axis] + [
             shape[time_axis] // num_timebins_aggr,
@@ -295,8 +299,10 @@ def load_dataset(
     labels_df : pd.DataFrame
         The labels of the dataset as a pandas DataFrame.
     spectrograms : np.ndarray
-        The spectrograms of the samples as a numpy array with
-        shape (num_samples, num_freq_bins, num_time_bins).
+        The spectrograms of the samples (in dB) as a numpy array with
+        shape (num_samples, num_freq_bins, num_time_bins), or
+        (num_samples, num_sus, num_freq_bins, num_time_bins) if
+        `aggregation_su` is 'none'.
     """
 
     img_path = os.path.join(datapath, "images")
@@ -332,15 +338,16 @@ def load_dataset(
             )
             batch_spectrograms[i + 1] = spectrogram
 
+        # rescale to the original value range (dB) before the aggregation,
+        # so that the averaging is done on the actual linear values
+        batch_spectrograms = v_min + batch_spectrograms / 255 * (v_max - v_min)
+
         batch_spectrograms = aggregate_spectrograms(
             batch_spectrograms,
             num_freqbins_aggr,
             num_timeslots_aggr,
             convert_from_log_to_lin_before=True,
         )
-
-        # rescale to the original value range
-        batch_spectrograms = v_min + batch_spectrograms / 255 * (v_max - v_min)
 
         return batch_spectrograms
 
