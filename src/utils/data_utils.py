@@ -429,10 +429,10 @@ def generate_dataset_splits(
     -------
     split_supervised : np.array
         Split assignment for each sample for the supervised protocol.
-        Values are ``"train"``, ``"valid"``, ``"test"``, or `None` (unused).
+        Values are ``"train"``, ``"valid"``, ``"test"``, or ``None`` (unused).
     split_unsupervised : np.array
         Split assignment for each sample for the unsupervised protocol.
-        Values are ``"train"``, ``"valid"``, ``"test"``, or `None` (unused).
+        Values are ``"train"``, ``"valid"``, ``"test"``, or ``None`` (unused).
     """
 
     jammer_types = np.asarray(jammer_types)

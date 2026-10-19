@@ -106,9 +106,9 @@ def _weighted_percentile(bin_edges, counts, percentile):
     Parameters
     ----------
     bin_edges : np.ndarray
-        Edges of the histogram bins, as returned by `np.histogram`.
+        Edges of the histogram bins, as returned by ``np.histogram``.
     counts : np.ndarray
-        Counts per bin, as returned by `np.histogram`.
+        Counts per bin, as returned by ``np.histogram``.
     percentile : float
         Percentile to compute, in [0, 100].
 
