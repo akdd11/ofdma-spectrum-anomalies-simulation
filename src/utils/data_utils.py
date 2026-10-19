@@ -312,7 +312,7 @@ def load_dataset(
         The spectrograms of the samples (in dB) as a numpy array with
         shape (num_samples, num_freq_bins, num_time_bins), or
         (num_samples, num_sus, num_freq_bins, num_time_bins) if
-        `aggregation_su` is 'none'.
+        ``aggregation_su`` is 'none'.
     """
 
     img_path = os.path.join(datapath, "images")
@@ -395,10 +395,10 @@ def generate_dataset_splits(
 
     Reproduces the split used for the paper submission: for each protocol, a
     fixed number of samples per class is taken positionally from the
-    (generation-order) sample sequence -- the first `num_train_*` samples of
-    a class go to train, the next `num_valid_*` to valid, and the *last*
-    `num_test_*` samples of the class go to test. Anomaly counts are divided
-    evenly across jammer types, with `left_out_types` (e.g. `random_hop`)
+    (generation-order) sample sequence -- the first ``num_train_*`` samples of
+    a class go to train, the next ``num_valid_*`` to valid, and the *last*
+    ``num_test_*`` samples of the class go to test. Anomaly counts are divided
+    evenly across jammer types, with ``left_out_types`` (e.g. ``random_hop``)
     held out of training/validation entirely for out-of-distribution
     generalization testing. See the "Data Splits" section in the README for
     the full rationale.
@@ -410,29 +410,29 @@ def generate_dataset_splits(
         sample, in the order the split columns should be returned in. Must
         be in generation order, since the split is positional.
     supervised : Mapping
-        `num_train_normal`, `num_valid_normal`, `num_test_normal`,
-        `num_train_anomaly`, `num_valid_anomaly`, `num_test_anomaly`. The
+        ``num_train_normal``, ``num_valid_normal``, ``num_test_normal``,
+        ``num_train_anomaly``, ``num_valid_anomaly``, ``num_test_anomaly``. The
         anomaly counts are divided evenly across the jammer types not in
-        `left_out_types` (train/valid) resp. across every jammer type (test).
+        ``left_out_types`` (train/valid) resp. across every jammer type (test).
     unsupervised : Mapping
-        `num_train_normal`, `num_valid_normal`, `num_test_normal`,
-        `num_test_anomaly` (unsupervised never trains/validates on anomaly
+        ``num_train_normal``, ``num_valid_normal``, ``num_test_normal``,
+        ``num_test_anomaly`` (unsupervised never trains/validates on anomaly
         samples). The test anomaly count is divided evenly across every
         jammer type.
     left_out_types : tuple of str
         Jammer types that are only ever assigned to the test split (for
         supervised learning), so that they can be used to evaluate
         generalization to a jammer type unseen during training. They are
-        never assigned to train/valid in either protocol. Default: `("random_hop",)`.
+        never assigned to train/valid in either protocol. Default: ``("random_hop",)``.
 
     Returns
     -------
     split_supervised : np.array
         Split assignment for each sample for the supervised protocol.
-        Values are `"train"`, `"valid"`, `"test"`, or `None` (unused).
+        Values are ``"train"``, ``"valid"``, ``"test"``, or `None` (unused).
     split_unsupervised : np.array
         Split assignment for each sample for the unsupervised protocol.
-        Values are `"train"`, `"valid"`, `"test"`, or `None` (unused).
+        Values are ``"train"``, ``"valid"``, ``"test"``, or `None` (unused).
     """
 
     jammer_types = np.asarray(jammer_types)

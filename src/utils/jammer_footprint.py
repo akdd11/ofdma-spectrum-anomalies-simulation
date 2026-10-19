@@ -5,7 +5,7 @@ The resource elements (REs) occupied by the jammer are not part of the dataset
 functions in this module infer the footprint from the spectrograms and the
 resource allocation images, exploiting the known structure of each jammer type.
 They are used to highlight the jammed regions in example spectrograms, see
-`src/plot_figures.py`.
+``src/plot_figures.py``.
 
 All spectrograms are expected in dB with shape (num_sc, num_symbols), and the
 resource allocation images with the same shape (index of the legitimate

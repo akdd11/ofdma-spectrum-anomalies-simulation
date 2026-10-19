@@ -201,7 +201,7 @@ def get_random_tx_location(scene_nr, scene_size, tx_height=1.5, **kwargs):
         the transmitter and the SU is ensured to be kept if specified.
     min_dist_to_su : float, optional
         Minimum distance between the transmitter and the closest
-        sensing unit in meters. Required if `su_coordinates` is given.
+        sensing unit in meters. Required if ``su_coordinates`` is given.
 
     Returns
     -------
@@ -576,7 +576,7 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
     su_hardware : pd.DataFrame
         Per-SU hardware impairment parameters, as returned by
         `impairment_utils.generate_su_hardware_params`. Only read from if
-        the corresponding impairment is enabled in `cfg.impairments`.
+        the corresponding impairment is enabled in ``cfg.impairments``.
     noise : bool, optional
         If True, the spectrogram is initialized with noise. Otherwise,
         the spectrogram is initialized with zeros (linear domain) and

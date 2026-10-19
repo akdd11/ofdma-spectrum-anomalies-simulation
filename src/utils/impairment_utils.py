@@ -9,7 +9,7 @@ Impairments implemented here:
 
 Hardware parameters are properties of a device, not of a sample: they are
 drawn once per SU with a dedicated seed via `generate_su_hardware_params` and
-held fixed for the whole dataset. The `apply_*` functions below are pure
+held fixed for the whole dataset. The ``apply_*`` functions below are pure
 transformations applied per sample using those fixed parameters.
 """
 
@@ -23,7 +23,7 @@ def generate_su_hardware_params(num_su, cfg):
     """Draw fixed per-SU hardware impairment parameters.
 
     Parameters are drawn once for the whole dataset using a dedicated seed
-    (`cfg.impairments.su_hardware_seed`), independent of which impairments are
+    (``cfg.impairments.su_hardware_seed``), independent of which impairments are
     currently enabled, so that toggling one impairment on/off does not change
     the draws of the others.
 
@@ -32,16 +32,16 @@ def generate_su_hardware_params(num_su, cfg):
     num_su : int
         Number of sensing units.
     cfg : OmegaConf
-        Configuration object, must contain the `impairments` block (see
-        `dataset_generation.yaml`).
+        Configuration object, must contain the ``impairments`` block (see
+        ``dataset_generation.yaml``).
 
     Returns
     -------
     su_hardware : pd.DataFrame
-        One row per SU (indexed by `su_idx`), with columns:
-        `timing_offset_samples`, `lo_freq_offset_ppm`,
-        `dc_offset_over_noise_db`, `dc_offset_phase_rad`,
-        `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, `iq_irr_db`
+        One row per SU (indexed by ``su_idx``), with columns:
+        ``timing_offset_samples``, ``lo_freq_offset_ppm``,
+        ``dc_offset_over_noise_db``, ``dc_offset_phase_rad``,
+        ``iq_gain_imbalance_db``, ``iq_phase_imbalance_deg``, ``iq_irr_db``
         (derived, informational only).
     """
 
@@ -136,7 +136,7 @@ def lo_frequency_rotation(delta_f_hz, sample_rate_hz, num_samples):
     Returns
     -------
     rotation : np.ndarray
-        Complex exponential of length `num_samples`, to be multiplied
+        Complex exponential of length ``num_samples``, to be multiplied
         elementwise with the (already channel-convolved) received time
         signal, before `apply_iq_imbalance`.
     """
@@ -148,7 +148,7 @@ def lo_frequency_rotation(delta_f_hz, sample_rate_hz, num_samples):
 def compute_iq_imbalance_coeffs(gain_imbalance_db, phase_imbalance_deg):
     """Compute the alpha/beta coefficients of a frequency-flat IQ imbalance.
 
-    Uses the standard model `y = alpha * x + beta * conj(x)`.
+    Uses the standard model ``y = alpha * x + beta * conj(x)``.
 
     Parameters
     ----------
@@ -175,7 +175,7 @@ def apply_iq_imbalance(sig, alpha, beta):
 
     Applied before the STFT, so the conjugate image of subcarrier k lands
     exactly on -k. Since the STFT window
-    is real, this is equivalent to `alpha * S[k] + beta * conj(S[-k])` in the
+    is real, this is equivalent to ``alpha * S[k] + beta * conj(S[-k])`` in the
     spectrogram domain, but needs no index bookkeeping on the cropped grid.
 
     Parameters
@@ -188,7 +188,7 @@ def apply_iq_imbalance(sig, alpha, beta):
     Returns
     -------
     sig_out : np.ndarray
-        IQ-imbalanced time signal, same shape as `sig`.
+        IQ-imbalanced time signal, same shape as ``sig``.
     """
 
     return alpha * sig + beta * np.conj(sig)
@@ -203,11 +203,11 @@ def apply_dc_offset(noise_sig, nfft, offset_over_noise_db, phase_rad):
     around DC exactly as in a real receiver (7 bins for Blackman-Harris).
 
     The magnitude is parameterized relative to the actual noise power of the
-    given `noise_sig`, so it tracks the instantaneous noise realization while
+    given ``noise_sig``, so it tracks the instantaneous noise realization while
     the dB offset and phase stay fixed hardware properties of the SU.
-    `offset_over_noise_db` is the *total* DC power relative to the noise power
-    per FFT bin (`mean(|noise_sig|^2) / nfft`). In the spectrogram, the sum of
-    the DC footprint over all bins therefore sits `offset_over_noise_db` above
+    ``offset_over_noise_db`` is the *total* DC power relative to the noise power
+    per FFT bin (``mean(|noise_sig|^2) / nfft``). In the spectrogram, the sum of
+    the DC footprint over all bins therefore sits ``offset_over_noise_db`` above
     the mean per-RE noise power; the centre bin alone holds 1/ENBW of it
     (about -3 dB for Blackman-Harris).
 
@@ -226,7 +226,7 @@ def apply_dc_offset(noise_sig, nfft, offset_over_noise_db, phase_rad):
     Returns
     -------
     noise_sig_out : np.ndarray
-        `noise_sig` plus the constant DC offset.
+        ``noise_sig`` plus the constant DC offset.
     """
 
     noise_power_per_bin = np.mean(np.abs(noise_sig) ** 2) / nfft

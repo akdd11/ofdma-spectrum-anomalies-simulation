@@ -1,16 +1,16 @@
 """This script generates the figures of the paper from a generated dataset:
 
-* `snr_sjr`: distribution of the SNR and SJR over all spectrograms
-* `allocation`: resource allocation of one sample (the deceptive example)
-* `spectrograms`: one example spectrogram per jammer type plus a normal one,
+* ``snr_sjr``: distribution of the SNR and SJR over all spectrograms
+* ``allocation``: resource allocation of one sample (the deceptive example)
+* ``spectrograms``: one example spectrogram per jammer type plus a normal one,
   with the jammed regions highlighted
 
 Only the published data (labels, metadata, and images) is used, so the figures
 can be reproduced from the dataset alone. The figures are sized for the IEEE
-two-column format and saved as PDF into the `figures` folder of the repository.
-The figures shown in the README are additionally saved as PNG into `assets`.
+two-column format and saved as PDF into the ``figures`` folder of the repository.
+The figures shown in the README are additionally saved as PNG into ``assets``.
 
-Usage: `python src/plot_figures.py [-d DATASET_NUMBER] [-f FIGURE ...]`
+Usage: ``python src/plot_figures.py [-d DATASET_NUMBER] [-f FIGURE ...]``
 """
 
 __docformat__ = "numpy"
@@ -96,7 +96,7 @@ class Dataset:
     Parameters
     ----------
     datapath : str
-        Path to the dataset folder (containing `labels.csv`, `config.yaml`, ...).
+        Path to the dataset folder (containing ``labels.csv``, ``config.yaml``, ...).
     """
 
     def __init__(self, datapath):
@@ -159,7 +159,7 @@ class Dataset:
         ----------
         measure : str
             Prefix of the per SU label columns, e.g., 'snr' for the columns
-            `snr_by_su_<j>`.
+            ``snr_by_su_<j>``.
 
         Returns
         -------

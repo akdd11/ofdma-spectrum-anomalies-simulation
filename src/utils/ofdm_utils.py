@@ -670,7 +670,7 @@ def calc_complex_spectrogram(
         Default: 0 (grid-synchronous, as before).
     num_cols : int, optional
         Number of columns (analysis windows) to compute. If None, it is
-        derived from `len(sig)` and `offset` as before, i.e. as many
+        derived from ``len(sig)`` and ``offset`` as before, i.e. as many
         columns as fit. Explicitly fixing it (e.g. to a value below the
         default) is what makes the offset applicable irrespective of its
         actual per-SU value while keeping the image dimensions constant
@@ -732,7 +732,7 @@ def calc_spectrogram(
     window : str
         Window function to use for the spectrogram.
         Default: "blackmanharris".
-        See `scipy.signal.windows` for available windows.
+        See ``scipy.signal.windows`` for available windows.
     plot : bool
         If True, the spectrogram is plotted.
         Default: True.
@@ -830,12 +830,12 @@ def jammer_mask_on_stft_grid(
     """Map the jammer's resource occupancy onto the columns of the STFT.
 
     The jammer is generated as blocks in the frequency domain, which are
-    `nfft + cp_len` samples long if a CP is added and `nfft` samples long
-    otherwise. The STFT windows are `nfft` samples long and hop by
-    `nfft + cp_len`, so without a CP the block grid drifts against the window
+    ``nfft + cp_len`` samples long if a CP is added and ``nfft`` samples long
+    otherwise. The STFT windows are ``nfft`` samples long and hop by
+    ``nfft + cp_len``, so without a CP the block grid drifts against the window
     grid (75 blocks over 70 columns) and a block can straddle two windows.
     A block marks every column in which it contributes at least
-    `min_energy_share` of the analysis window's energy (default 1/4, i.e. its
+    ``min_energy_share`` of the analysis window's energy (default 1/4, i.e. its
     resource elements are lifted to within 6 dB of a fully covered window).
     With this threshold every block is marked in at least one column. With a
     CP each window lies inside one block, so this is the identity mapping.

@@ -1,7 +1,7 @@
 """This script converts custom dataset samples into a format suitable for further
 processing, either as one PNG file per spectrogram/resource-allocation grid, or
-as a single per-dataset HDF5 file. Select the format via `--output-format`
-(`png`, the default, or `hdf5`); see `samples_to_imgs_and_labels` and
+as a single per-dataset HDF5 file. Select the format via ``--output-format``
+(``png``, the default, or ``hdf5``); see `samples_to_imgs_and_labels` and
 `samples_to_hdf5_and_labels` respectively. Both formats apply the same 8-bit
 quantization (see below) and produce identical values, just packaged
 differently on disk.
@@ -147,7 +147,7 @@ def compute_clipping_values(
     (mostly non-jammed) distribution would cut it too aggressively.
 
     Both percentiles are estimated from histograms built in a single pass
-    over the sample files (using `assumed_value_range` for the bin edges),
+    over the sample files (using ``assumed_value_range`` for the bin edges),
     so memory usage stays independent of the dataset size and the sample
     files only need to be read once here (matching the one read for image
     generation afterwards).
@@ -387,11 +387,11 @@ def samples_to_hdf5_and_labels(
       num_time_bins), dtype uint8.
 
     Both datasets are created lazily on the first sample seen (once the
-    per-sample shapes are known) and grown with `Dataset.resize` as samples
+    per-sample shapes are known) and grown with ``Dataset.resize`` as samples
     are appended, since the total sample count across all input files is not
-    known ahead of time. `su_idx` is used directly as the row index into the
+    known ahead of time. ``su_idx`` is used directly as the row index into the
     SU axis, which relies on it being a contiguous 0-based index (see
-    `Sample.plot_all_spectrograms` in `src/utils/datatypes.py`, which makes
+    `Sample.plot_all_spectrograms` in ``src/utils/datatypes.py``, which makes
     the same assumption).
 
     Parameters
