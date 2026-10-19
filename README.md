@@ -218,7 +218,9 @@ The output folder can be changed with `-o`. The resource allocation and example 
 
 ### Documentation
 
-Generate the documentation for the simulation framework from the root of the repository with the following command:
+The API reference of the simulation framework (`src` folder) is available at [akdd11.github.io/ofdma-spectrum-anomalies-simulation](https://akdd11.github.io/ofdma-spectrum-anomalies-simulation/). It is rebuilt automatically from the docstrings on every push to `main`.
+
+To generate it locally, run the following command from the root of the repository (output in `docs/`):
 
 ```bash
 pydoctor --config pydoctor.ini

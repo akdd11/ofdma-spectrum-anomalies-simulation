@@ -35,9 +35,9 @@ jobs:
         run: pip install pydoctor==25.10.1
 
       # fails on docstring errors; link warnings for external types are expected
-      # --use-hardlinks: copy index.html instead of creating a symlink to it
+      # the source links point to the built commit, so that the line numbers match
       - name: Build documentation
-        run: pydoctor --use-hardlinks
+        run: pydoctor --html-viewsource-base=https://github.com/${{ github.repository }}/blob/${{ github.sha }}
 
       - uses: actions/upload-pages-artifact@v4
         with:

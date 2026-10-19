@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html xmlns:t="http://twistedmatrix.com/ns/twisted.web.template/0.1">
+  <meta name="pydoctor-template-version" content="3" />
+
+  <t:transparent t:render="head">Head</t:transparent>
+
+  <body>
+
+    <div t:render="header" />
+
+    <nav class="navbar navbar-default mainnavbar">
+      <t:transparent t:render="nav" /></nav>
+
+    <div class="container-fluid">
+
+      <div t:render="subheader" />
+
+      <p>
+        The framework generates labeled spectrograms of an OFDMA system with
+        legitimate transmitters and jammers, based on ray-traced channels.
+        These pages document the code in the <code>src</code> folder of the
+        latest version on the <code>main</code> branch.
+      </p>
+
+      <h2>Pipeline</h2>
+      <p>
+        The scene generation with Blender (<code>blender-python</code>) is
+        described in the README. The following scripts are run in this order:
+      </p>
+      <ol>
+        <li>
+          <code><a href="dataset_generation.html">dataset_generation</a></code>:
+          ray tracing and generation of the custom intermediate data.
+        </li>
+        <li>
+          <code><a href="custom_data_export.html">custom_data_export</a></code>:
+          export to spectrogram and resource allocation images (or HDF5),
+          labels and data splits.
+        </li>
+        <li>
+          <code><a href="plot_figures.html">plot_figures</a></code>:
+          figures of the paper, from an exported dataset.
+        </li>
+      </ol>
+      <p>
+        The shared functionality (OFDM signal generation, ray tracing, hardware
+        impairments, data loading and datatypes) is in the
+        <code><a href="utils.html">utils</a></code> package.
+      </p>
+
+      <h2>Indexes</h2>
+      <ul>
+        <li>
+          A listing of <a href="moduleIndex.html">all modules and
+          packages</a>, organized by package hierarchy.
+        </li>
+        <li>
+          A listing of <a href="classIndex.html">all classes</a>,
+          organized by inheritance hierarchy.
+        </li>
+        <li>
+          A listing of <a href="nameIndex.html">all functions, classes,
+          modules and packages</a>, ordered by name.
+        </li>
+      </ul>
+    </div>
+
+    <footer class="container-fluid" t:render="footer" />
+
+  </body>
+</html>
