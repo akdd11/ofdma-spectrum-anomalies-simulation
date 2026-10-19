@@ -18,3 +18,5 @@ tensorflow==2.21.0
 tqdm==4.67.3
 # Scene creation only (scripts in blender-python/), not part of the simulation environment:
 # bpy==5.1.2
+# Documentation only (pydoctor.ini), not part of the simulation environment:
+# pydoctor

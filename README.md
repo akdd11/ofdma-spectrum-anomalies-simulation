@@ -2,7 +2,7 @@
 
 ## Abstract
 
-This repository belongs to the paper "Spectrum Anomaly Detection in OFDMA Systems: Simulation Framework and Benchmark Dataset", available on arXiv: [arXiv:2606.02102](https://arxiv.org/abs/2606.02102). It provides a modular, open-source simulation framework for generating physics-driven datasets of spectrum anomalies in OFDMA systems. It combines Blender and the Mitsuba add-on for ray-traced channel generation with Sionna-based processing to produce labeled spectrograms suitable for training and benchmarking machine learning models for spectrum anomaly detection. The framework supports configurable scenarios (legitimate transmitters, jammers, varied propagation conditions), produces detailed labels for each sample, and includes scripts to reproduce dataset generation and evaluation. The code and datasets accompany the paper "Spectrum Anomaly Detection in OFDMA Systems: Simulation Framework and Benchmark Dataset", available on arXiv, and are intended to enable reproducible research and quantitative comparison of anomaly detection methods.
+This repository belongs to the paper "Spectrum Anomaly Detection in OFDMA Systems: Simulation Framework and Benchmark Dataset", available on arXiv: [arXiv:2606.02102](https://arxiv.org/abs/2606.02102). It provides a modular, open-source simulation framework for generating physics-driven datasets of spectrum anomalies in OFDMA systems. It combines Blender and the Mitsuba add-on for ray-traced channel generation with Sionna-based processing to produce labeled spectrograms suitable for training and benchmarking machine learning models for spectrum anomaly detection. The framework supports configurable scenarios (legitimate transmitters, jammers, varied propagation conditions), produces detailed labels for each sample, and includes scripts to reproduce dataset generation and evaluation, to enable reproducible research and quantitative comparison of anomaly detection methods.
 
 The dataset is available for download at Zenodo:
 
@@ -22,7 +22,12 @@ The key of this simulation is a scene, in which ray tracing is executed to obtai
 
 * Blender 4.2.19 LTS
 * Mitsuba Add-on for Blender 0.4.0 (follow the installation instructions [here](https://github.com/mitsuba-renderer/mitsuba-blender))
-* The Python script uses PyYAML to read the configuration file `blender-python/conf/scene_attributes.yaml`. Install it in the Blender Python environment by running
+* PyYAML in the Blender Python environment, to read the configuration file `blender-python/conf/scene_attributes.yaml`
+
+<details>
+<summary>Installing PyYAML in Blender</summary>
+
+Run the following in the Blender `Scripting` tab:
 
 ```python
 import subprocess
@@ -31,7 +36,7 @@ import sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "PyYAML"])
 ```
 
-in the Blender `Scripting` tab.
+</details>
 
 ### Usage
 
@@ -41,91 +46,128 @@ Open Blender and go to the Scripting workspace. Open the `blender-python/create_
 
 ### Requirements
 
-The datasets have been generated with Python 3.12.12 and Sionna (RT) 1.2.1 (Mitsuba 3.7.1, Dr.Jit 1.2.0) on Windows Server 2025 with an NVIDIA L40S GPU. The exact package versions of that environment are pinned in the file `requirements_simulation.txt`. Scene creation with Blender (`blender-python/`) additionally needs `bpy`, which is not part of this environment.
+The datasets have been generated with Python 3.12.12 and Sionna (RT) 1.2.1 (Mitsuba 3.7.1, Dr.Jit 1.2.0) on Windows Server 2025 with an NVIDIA L40S GPU. The exact package versions of that environment are pinned in the file `requirements_simulation.txt`.
 
 ### Create custom intermediate data
 
-Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src/conf/dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details. The coordinates of the sensing units are specified in the file `src/conf/su_coordinates.yaml`. At generation time they are also snapshotted into `su_coordinates.csv` in the dataset folder (one row per SU, columns `su_idx`, `x`, `y`, `z` in meters; `su_idx` is the same SU index as the SU axis of the spectrograms), so the dataset remains self-describing even if the yaml is edited later.
+Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src/conf/dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details. The coordinates of the sensing units are specified in the file `src/conf/su_coordinates.yaml`.
 
-The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, in which the custom intermediate data is stored in a subdirectory named `custom`.
+The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, its content is described in [Dataset folder](#dataset-folder).
 
 The samples are generated grouped by class, and the sample index (generation order) is the same in all output files. First come the normal samples, followed by one block per jammer type, in the order `deceptive`, `sweep`, `barrage`, `pilot`, `random_hop`. The number of samples per jammer type is `nr_samples * jam_probability / 5` (rounded down), the remaining samples are normal. With the default configuration (20000 samples, `jam_probability: 0.5`), samples 0-9999 are normal, followed by blocks of 2000 samples per jammer type (e.g., `deceptive`: 10000-11999, `random_hop`: 18000-19999).
 
-All per-sample random draws (transmitter and jammer positions, resource allocation, payload, jammer waveform, noise) use the global NumPy RNG, seeded by `seed` in the config; none of them depends on the ray-tracing result, so this part is reproduced exactly. The Sionna RT path solver samples its rays with a fixed seed as well, but on the GPU it is not bit-exact. Measured on scene 0, the per-link received power differed by at most 0.03 dB between repeated runs and separate processes. In two complete generation runs with the same seed (10 samples × 21 SUs), all drawn quantities were identical, the per-SU SNR agreed within 0.02 dB, 0.05 % of the resource elements differed by more than one 8-bit quantization step (0.37 dB), and 0.001 % by more than 1 dB (low-level REs near the noise floor, where small channel changes shift partial cancellations). A regenerated dataset is therefore identical up to these deviations, not bit-identical. The resolved configuration of each run, including the seed, command-line overrides and derived quantities, is saved as `config.yaml` in the dataset folder.
+All per-sample random draws (transmitter and jammer positions, resource allocation, payload, jammer waveform, noise) use the global NumPy RNG, seeded by `seed` in the config, and are reproduced exactly. The Sionna RT path solver samples its rays with a fixed seed as well, but on the GPU it is not bit-exact, so a regenerated dataset is identical up to small deviations, not bit-identical. The resolved configuration of each run, including the seed, command-line overrides and derived quantities, is saved as `config.yaml` in the dataset folder.
 
 ### Hardware impairments
 
-The SUs are modeled as mid-quality monitoring receivers with calibrated IQ paths, which are synchronized to the network in time and frequency with the accuracy of a 5G UE. Under this assumption, the residual timing and LO frequency offsets have a negligible effect on the magnitude spectrograms, while the DC offset and, for very strong signals, the IQ imbalance image are visible (see [Spectrograms](#spectrograms)).
+The spectrograms contain receiver-side hardware impairments of the SUs (IQ imbalance, DC offset, and residual timing and LO frequency offsets), modeled as described in Sec. III-D2 of the [paper](https://arxiv.org/abs/2606.02102). The impairment parameters are drawn once per SU, held fixed for the whole dataset, and stored in `su_hardware.csv` in the dataset folder.
 
-Optional receiver-side hardware impairments (SU STFT timing offset, SU LO frequency offset, RX DC offset, RX IQ imbalance) can be enabled under the `impairments:` block in `src/conf/dataset_generation.yaml`. A master `impairments.enabled` switch gates all of them at once; each impairment also has its own `enabled` flag so individual impairments can be toggled independently. Since the hardware parameters are drawn with a dedicated RNG (see below), toggling impairments does not change any other random draw, i.e., with the same `seed`, an ideal and an impaired dataset contain the same scenarios (ideal-vs-impaired ablation).
+<details>
+<summary>Configuration and implementation</summary>
 
-Per SU, the impairments are applied in the following order: the received signal and jammer time signals (after the channel) are rotated by the LO frequency offset, and then the IQ imbalance is applied to them. The DC offset is added to the noise time signal. Finally, the STFT window is shifted by the timing offset.
+The impairments are configured under the `impairments:` block in `src/conf/dataset_generation.yaml`. A master `impairments.enabled` switch gates all of them at once; each impairment also has its own `enabled` flag so individual impairments can be toggled independently. Since the hardware parameters are drawn with a dedicated RNG (seeded by `impairments.su_hardware_seed`), toggling impairments does not change any other random draw, i.e., with the same `seed`, an ideal and an impaired dataset contain the same scenarios (ideal-vs-impaired ablation).
 
-Impairment parameters are properties of a sensing unit's hardware, not of a sample: they are drawn once per SU (seeded by `impairments.su_hardware_seed`) and held fixed for the whole dataset, rather than redrawn per sample. They are persisted to `su_hardware.csv` in the dataset folder (one row per SU), with columns `timing_offset_samples`, `lo_freq_offset_ppm`, `dc_offset_over_noise_db`, `dc_offset_phase_rad`, `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, and `iq_irr_db` (derived, informational only). The file is always written with all drawn parameters, even if some or all impairments are disabled; which impairments were actually applied is recorded in the `impairments:` block of the `config.yaml` in the dataset folder. The models are implemented in `src/utils/impairment_utils.py`.
+Per SU, the impairments are applied in the following order: the received signal and jammer time signals (after the channel) are rotated by the LO frequency offset, and then the IQ imbalance is applied to them. The DC offset is added to the noise time signal. Finally, the STFT window is shifted by the timing offset. The models are implemented in `src/utils/impairment_utils.py`.
+
+`su_hardware.csv` contains one row per SU, with the columns `timing_offset_samples`, `lo_freq_offset_ppm`, `dc_offset_over_noise_db`, `dc_offset_phase_rad`, `iq_gain_imbalance_db`, `iq_phase_imbalance_deg`, and `iq_irr_db` (derived, informational only). The file is always written with all drawn parameters, even if some or all impairments are disabled; which impairments were actually applied is recorded in the `impairments:` block of the `config.yaml` in the dataset folder.
+
+</details>
 
 ### Create image data and labels
 
-To further utilize the data, the script `src/custom_data_export.py` can be executed, which creates spectrograms and labels from the custom intermediate data. The dataset number can be configured via the command line, run `python src/custom_data_export.py -d <dataset_number>` to specify it. The output container is selected with `--output-format {png,hdf5}` (default `png`); both formats apply the identical 8-bit quantization scheme described below and contain the same values, just packaged differently on disk. Two kinds of per-sample data are generated in either format:
-* Spectrograms per sensing unit (SU): normalized spectrograms, one per sample and SU. The spectrograms are normalized over the entire dataset, so the same value range is used for all spectrograms, allowing for a consistent representation across different samples and sensing units. Rather than using the raw dataset-wide minimum/maximum, the spectrograms are first **clipped** to a percentile-based range before being scaled to 8 bit: the lower bound is the 0.1st percentile of all spectrogram values (jammed and non-jammed), and the upper bound is the 99.99th percentile of spectrogram values from jammed samples only. This is because the raw min/max are dominated by a handful of extreme outlier values, which otherwise waste most of the 256 available grey levels on a value range that almost no pixel occupies. Clipping the lower tail (dominated by noise floor, carrying no information) and the upper tail conservatively (only over jammed samples, so jammer power - the anomaly-relevant signal - is not clipped away) increases the effective resolution. The clipping bounds are computed per dataset from its own sample data (so they adapt automatically if the dataset is regenerated with different parameters), and are contained in the file `spectrogram_min_max.csv` (columns `min_val`/`max_val`, kept for backwards compatibility), which is stored in the root of the dataset folder. See `notebooks/analyze_clipping_percentiles.ipynb` for the analysis behind this choice.
-* Resource allocation grids: contain the resource allocation of the transmitters, in which 0 corresponds to not allocated and any other value corresponds to the allocated transmitter index.
+To further utilize the data, the script `src/custom_data_export.py` can be executed, which creates spectrograms and labels from the custom intermediate data. The dataset number can be configured via the command line, run `python src/custom_data_export.py -d <dataset_number>` to specify it. Two kinds of per-sample data are generated:
+* Spectrograms per sensing unit (SU), one per sample and SU, with one pixel per resource element (RE), i.e., 1320 subcarriers × 70 OFDM symbols with the default configuration. They are clipped to a dataset-wide range (0.1st percentile of all values to 99.99th percentile of the jammed samples, see Sec. IV-B1 of the [paper](https://arxiv.org/abs/2606.02102) and `notebooks/analyze_clipping_percentiles.ipynb`) and scaled to 8 bit. The clipping bounds are computed per dataset and stored in `spectrogram_min_max.csv`; a pixel value $v$ corresponds to `min_val + v / 255 * (max_val - min_val)` in dB.
+* Resource allocation grids, with the same resolution as the spectrograms (each RB and slot expanded to its REs), in which 0 corresponds to not allocated and any other value corresponds to the allocated transmitter index.
 
-With `--output-format png` (default), these are stored as 8-bit PNG files in the same directory as the custom intermediate data, in the subdirectory `images`: spectrograms as `spectrogram-{sample_idx}-{su_idx}.png` and resource allocations as `alloc_res-{sample_idx}.png`.
+Both are stored as 8-bit PNG files in the subdirectory `images`.
 
-With `--output-format hdf5`, both are stored in a single file `dataset.h5` in the root of the dataset folder, as two datasets:
-* `spectrograms`, shape `(num_samples, num_su, num_freq_bins, num_time_bins)`, dtype `uint8`.
-* `resource_allocations`, shape `(num_samples, num_freq_bins, num_time_bins)`, dtype `uint8`.
+<details>
+<summary>Export to HDF5</summary>
 
-Both datasets are gzip-compressed and hold the exact same per-sample data as the PNG output (verified to be pixel-identical), just addressed by array index instead of by filename. They are combined in one file rather than split across two, since they are written together from the same per-sample loop over the same intermediate data — this makes the sample-index correspondence between the two datasets structurally guaranteed rather than relying on two files being kept in sync by convention, at negligible cost since HDF5 lets a consumer read one dataset without touching the other. `labels.csv` and `spectrogram_min_max.csv` are kept as separate files regardless of `--output-format`, since they already need to be joined with the spectrogram data by sample index for either output format.
+With `--output-format hdf5` (default `png`), the spectrograms and resource allocation grids are instead stored in a single gzip-compressed file `dataset.h5`, with the same 8-bit values as the PNG files. It contains the datasets `spectrograms` (shape `(num_samples, num_su, num_freq_bins, num_time_bins)`) and `resource_allocations` (shape `(num_samples, num_freq_bins, num_time_bins)`), both of dtype `uint8` and indexed by the sample index.
 
-**Using the HDF5 dataset in a PyTorch pipeline:** do not open the HDF5 file inside a `Dataset.__init__`. `DataLoader` with `num_workers > 0` creates its worker processes by forking (on Linux/Mac), and an `h5py.File` handle that is already open at that point gets inherited by every worker as a copy of the same underlying HDF5 state (read buffers, caches, locks) — since that state isn't safe to share across processes, concurrent reads through it can hang, crash, or silently return corrupted data. Store only the file path in `__init__` and open the file lazily on first use inside `__getitem__` (e.g. `if self.h5file is None: self.h5file = h5py.File(self.path, "r")`), so that each worker process opens and owns its own independent handle. This has no effect on `num_workers=0`, since there is only ever one process touching the file in that case.
+</details>
 
-In addition, in the same directory, a file named `labels.csv` is created, which contains the following labels for each sample:
-* `jammer_type`: Type of the jammer, one of `"deceptive"`, `"sweep"`, `"barrage"`, `"pilot"`, `"random_hop"` (random hopping tone jammer), or `"no jammer"`.
-* `jammer_power`: Transmit power of the jammer in dBm (if there is no jammer, the value is NaN).
-* `jammer_x`, `jammer_y`, `jammer_z`: Location of the jammer in the scene coordinate system in m, one column per coordinate (if there is no jammer, the values are NaN).
-* `num_legitimate_transmitters`: Number of legitimate transmitters in the scene.
-* `jammer_occupancy`: Fraction of the resource elements of the time-frequency grid that are occupied by the jammer (NaN if there is no jammer). Identical for all SUs, since it only depends on the jammer signal.
-* `snr_by_su_<su_idx>`: Signal-to-noise ratio (SNR) at each sensing unit (SU) in dB.
-* `sjr_by_su_<su_idx>`: Signal-to-jammer ratio (SJR) at each sensing unit (SU) in dB (`inf` if there is no jammer, since the jammer power is then zero).
-* `jsnr_local_by_su_<su_idx>`: Local jammer-to-signal-plus-noise ratio (JSNR) at each SU in dB (NaN if there is no jammer). Computed only over the jammer-occupied resource elements, as the ratio of mean jammer power to mean signal-plus-noise power there (noise power is estimated over the full grid to avoid distortion by a small footprint).
-* `db_contrast_global_by_su_<su_idx>`: Global dB contrast at each SU (NaN if there is no jammer). The mean, over all resource elements of the grid, of the per-pixel dB difference between the spectrogram with and without the jammer.
-* `db_contrast_local_by_su_<su_idx>`: Local dB contrast at each SU (NaN if there is no jammer). Same per-pixel dB difference as above, but averaged only over the jammer-occupied resource elements.
-* `split_supervised`: Train/valid/test assignment for the supervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See [Data splits](#data-splits) below.
-* `split_unsupervised`: Train/valid/test assignment for the unsupervised protocol (`"train"`, `"valid"`, `"test"`, or empty if unused). See [Data splits](#data-splits) below.
+#### Dataset folder
+
+```
+<datapath>/<dataset_nr>/
+├── config.yaml              # resolved configuration of the generation run
+├── su_coordinates.csv       # SU positions (su_idx, x, y, z in m), su_idx = SU index of the spectrograms
+├── su_hardware.csv          # per-SU hardware impairment parameters, see Hardware impairments
+├── custom/
+│   └── samples-XXXX.pkl     # custom intermediate data, batches of batch_size samples
+├── images/                  # --output-format png
+│   ├── spectrogram-{sample_idx:05d}-{su_idx:02d}.png
+│   └── alloc_res-{sample_idx:05d}.png
+├── dataset.h5               # --output-format hdf5
+├── labels.csv               # labels and data splits, one row per sample
+└── spectrogram_min_max.csv  # clipping bounds, to rescale the 8-bit values to dB
+```
+
+#### Labels
+
+`labels.csv` contains one row per sample, in the order of the sample index. Columns marked with `<su_idx>` exist once per SU. Jammer-related values are NaN for samples without a jammer, except for the SJR, which is `inf`.
+
+| Column | Description |
+|---|---|
+| `jammer_type` | `"deceptive"`, `"sweep"`, `"barrage"`, `"pilot"`, `"random_hop"` (random hopping tone jammer), or `"no jammer"` |
+| `jammer_power` | Transmit power of the jammer in dBm |
+| `jammer_x`, `jammer_y`, `jammer_z` | Location of the jammer in the scene coordinate system in m |
+| `num_legitimate_transmitters` | Number of legitimate transmitters in the scene |
+| `jammer_occupancy` | Fraction of the resource elements (REs) occupied by the jammer (identical for all SUs) |
+| `snr_by_su_<su_idx>` | Signal-to-noise ratio (SNR) in dB, over the whole time-frequency grid |
+| `sjr_by_su_<su_idx>` | Signal-to-jammer ratio (SJR) in dB, over the whole time-frequency grid |
+| `jsnr_local_by_su_<su_idx>` | Local jammer-to-signal-plus-noise ratio (JSNR) in dB, over the jammer-occupied REs |
+| `db_contrast_global_by_su_<su_idx>` | Mean dB contrast caused by the jammer, over all REs |
+| `db_contrast_local_by_su_<su_idx>` | Mean dB contrast caused by the jammer, over the jammer-occupied REs |
+| `split_supervised`, `split_unsupervised` | `"train"`, `"valid"`, `"test"`, or empty if unused, see [Data splits](#data-splits) |
+
+The jammer impact metrics (occupancy, local JSNR, dB contrast) are defined in [Jammer impact metrics](#jammer-impact-metrics).
 
 #### Data splits
 
-`split_supervised` and `split_unsupervised` are computed once at generation time (`generate_dataset_splits` in `src/utils/data_utils.py`) so that the benchmark's train/valid/test assignment is a fixed, reproducible property of the released dataset rather than something recomputed per experiment. The split is positional and reproduces the split used for the paper submission: within each class, samples are taken in generation order (i.e., by sample index) — the first `num_train_*` go to train, the next `num_valid_*` to valid, and the *last* `num_test_*` to test. Anomaly counts are divided evenly across jammer types. Counts are configurable per protocol in `src/conf/dataset_generation.yaml` under `split:`.
+The dataset comes with a predefined train/valid/test split for supervised and unsupervised learning. With the default configuration, it reproduces the split used in the paper:
 
-* **The normal (`"no jammer"`) train/valid counts are independent per protocol** — `supervised` and `unsupervised` each slice their own `num_train_normal`/`num_valid_normal` from the start of the normal pool, so the two protocols can use different amounts of normal training data.
-* **The test set uses the same per-class counts for both protocols by default**, taken from the *end* of each class's samples, so results are directly comparable — but since each protocol slices independently from its own `num_test_*` config, the two columns are only identical if those counts match.
-* **Unsupervised training only ever uses `"no jammer"` samples**: `split_unsupervised` is `"train"`/`"valid"` only for normal samples; every other jammer type is only ever `"test"` or unused there.
-* **Supervised training uses all jammer types except those in `left_out_types`** (default `["random_hop"]`), which is only ever assigned `"test"` (at the same per-type count as every other type) and never `"train"`/`"valid"`. This is used to evaluate generalization to a jammer type unseen during training; see the paper for details.
-* Rows with an empty split value are not part of either protocol's train/valid/test set for that column. This occurs for `left_out_types` in `split_supervised` (never train/valid), and for any sample not covered by the configured counts (e.g. a class's middle portion between the train/valid block at the start and the test block at the end, if the counts don't add up to the full class size).
+| | Supervised | Unsupervised |
+|---|---|---|
+| Normal train / valid / test | 5900 / 100 / 1000 | 8800 / 200 / 1000 |
+| Anomaly train / valid | 5900 / 100 (1475 / 25 per type, without `random_hop`) | - |
+| Anomaly test | 2500 (500 per type, including `random_hop`) | 2500 (500 per type) |
+
+`random_hop` is excluded from the supervised training and validation sets, to evaluate the generalization to a jammer type unseen during training. Following the evaluation protocol of the paper (Sec. IV-C), a sample is labeled as anomalous if a jammer is present, irrespective of whether it is perceptible at every SU. Normalization statistics (e.g., mean and variance, or minimum and maximum) must be computed on the training or validation set only, never on the test set; for min-max normalization, a margin above the training maximum is recommended, since jammed samples can exceed the training range. The AUC is recommended as the primary metric.
+
+<details>
+<summary>Split rules and configuration</summary>
+
+The assignments are computed by `src/custom_data_export.py` (`generate_dataset_splits` in `src/utils/data_utils.py`). The split is positional: within each class, the first `num_train_*` samples (by sample index) go to train, the next `num_valid_*` to valid, and the *last* `num_test_*` to test; samples in between remain unassigned (empty). Anomaly counts are divided evenly across the jammer types. The types in `left_out_types` (default `random_hop`) are only assigned to the test set. Since the test samples are taken from the end of each class for both protocols, both protocols share the same test set as long as their `num_test_*` counts match (as by default). The counts and `left_out_types` are configured under `split:` in `src/conf/dataset_generation.yaml`.
+
+</details>
 
 #### Jammer impact metrics
 
-The SNR and the SJR are averaged over the whole time-frequency grid. This is a meaningful measure of difficulty when the anomaly score of a detector is pooled by averaging over the spectrogram as well, because a sparse jammer is then diluted in the same way. However, a jammer that only occupies a small part of the grid, such as the pilot jammer, can leave a strong trace on the few resource elements it actually affects while its grid-wide average power stays low. The following metrics are provided in addition, in order to describe this local impact.
+The SNR and the SJR are averaged over the whole time-frequency grid, which dilutes a jammer that only occupies a small part of it, such as the pilot jammer. The occupancy, the local JSNR, and the dB contrast describe the impact of the jammer on the REs it actually occupies; they are defined in Sec. IV-B3 of the [paper](https://arxiv.org/abs/2606.02102).
 
-The jammer occupancy $\rho$ is the fraction of resource elements that are occupied by the jammer. It is the quantity that relates the grid-wide averages to the local ones, since approximately
+<details>
+<summary>Definitions and notes</summary>
 
-$$\mathrm{SJR}_\mathrm{global} \approx \mathrm{SJR}_\mathrm{local} - 10 \log_{10}(\rho).$$
+**Occupancy** $\rho$: the fraction of REs occupied by the jammer. It relates the grid-wide to the local quantities, approximately $\mathrm{SJR}_\mathrm{global} \approx \mathrm{SJR}_\mathrm{local} - 10 \log_{10}(\rho)$, and differs by orders of magnitude between the jammer types.
 
-It only depends on the jammer and is therefore identical for all SUs. The occupancy differs by orders of magnitude between the jammer types, which is why the grid-wide SJR alone is not directly comparable across them.
-
-The local JSNR compares the jammer to everything else it competes with, evaluated only on the resource elements the jammer occupies,
+**Local JSNR**: compares the jammer to the background on the REs it occupies,
 
 $$\mathrm{JSNR}_\mathrm{local} = 10 \log_{10} \frac{\overline{|J|^2}}{\overline{|S|^2} + \overline{|N|^2}},$$
 
-where $S$, $J$ and $N$ denote the signal, jammer and noise contribution to the spectrogram and the averages of $S$ and $J$ are taken over the occupied resource elements. Signal and noise are combined, because a detector operating on the spectrogram cannot separate them, they both act as background. Positive values indicate that the jammer dominates its own footprint.
+where $S$, $J$ and $N$ denote the signal, jammer and noise contribution to the spectrogram. The averages of $S$ and $J$ are taken over the occupied REs, the noise power over the whole grid. Positive values indicate that the jammer dominates its own footprint.
 
-The dB contrast measures the change of the spectrogram caused by the jammer directly in the logarithmic domain the spectrogram images are provided in,
+**dB contrast**: the change of the spectrogram caused by the jammer, in the logarithmic domain of the spectrogram images,
 
 $$\Delta = 20 \log_{10}|S + J + N| - 20 \log_{10}|S + N|.$$
 
-Since all spectrograms are scaled with the same dataset-wide clipping bounds, a contrast of $\Delta$ corresponds to the same number of grey levels in every image (as long as the values lie within the clipping range), so this metric is expressed in the units a detector actually operates on. Two variants are provided: `db_contrast_global` is the mean of $\Delta$ over all resource elements and thereby corresponds to a mean pooled anomaly score, whereas `db_contrast_local` is the mean over the occupied resource elements only and describes how much the affected part of the spectrogram is lifted.
+`db_contrast_global` is the mean of $\Delta$ over all REs and corresponds to a mean-pooled anomaly score, `db_contrast_local` is the mean over the occupied REs. Since all spectrograms share the same clipping bounds, $\Delta$ corresponds to the same number of grey levels in every image (within the clipping range).
 
-**NOTE**: The occupancy refers to the resource elements the jammer signal is generated on. Because of the finite analysis window, the visible footprint in the spectrogram can be somewhat wider than the occupancy suggests (most notably for the pilot jammer, whose energy sits on isolated subcarriers), and the local metrics describe the strongly affected resource elements.
+**NOTE**: The occupancy refers to the REs the jammer signal is generated on. Because of the finite analysis window, the visible footprint in the spectrogram can be somewhat wider (most notably for the pilot jammer, whose energy sits on isolated subcarriers).
+
+</details>
 
 
 ### Load the data
@@ -164,7 +206,14 @@ The figures of the paper (SNR/SJR distribution, resource allocation, and example
 python src/plot_figures.py
 ```
 
-and saved as PDF into the `figures` folder (`-o` for another folder). The resource allocation and example spectrogram figures are additionally saved as PNG into the `assets` folder (`--assets-path`), from where they are embedded in this README. Individual figures can be selected with `-f` (`snr_sjr`, `allocation`, `spectrograms`), another dataset with `-d`. The distributions of the jammer impact metrics (`occupancy_distribution.pdf`, `jsnr_local_distribution.pdf`, `db_contrast_*_distribution.pdf`) are created by the notebook `notebooks/plot_spectrograms.ipynb`. The script only uses the published data, i.e., the figures can be reproduced from the downloaded dataset. The regions occupied by the jammers, which are highlighted in the example spectrograms, are not contained in the dataset; they are inferred from the spectrograms and resource allocation images (see `src/utils/jammer_footprint.py`).
+and saved as PDF into the `figures` folder. The script only uses the published data, i.e., the figures can be reproduced from the downloaded dataset.
+
+<details>
+<summary>Options and further figures</summary>
+
+The output folder can be changed with `-o`. The resource allocation and example spectrogram figures are additionally saved as PNG into the `assets` folder (`--assets-path`), from where they are embedded in this README. Individual figures can be selected with `-f` (`snr_sjr`, `allocation`, `spectrograms`), another dataset with `-d`. The distributions of the jammer impact metrics (`occupancy_distribution.pdf`, `jsnr_local_distribution.pdf`, `db_contrast_*_distribution.pdf`) are created by the notebook `notebooks/plot_spectrograms.ipynb`. The regions occupied by the jammers, which are highlighted in the example spectrograms, are not contained in the dataset; they are inferred from the spectrograms and resource allocation images (see `src/utils/jammer_footprint.py`).
+
+</details>
 
 
 ### Documentation
@@ -179,14 +228,14 @@ pydoctor --config pydoctor.ini
 
 ## Detection
 
-The baseline models for supervised and unsupervised detection are separated from the simulation framework. The corresponding code and supplements can be found in the `Example_Use` folder, which also has a separate README file. The code for the baseline models is provided as a starting point and can be further developed and improved. The code for the baseline models is not required to generate the dataset, but it can be used to evaluate the generated dataset and to provide a benchmark for future research on spectrum anomaly detection in OFDMA systems.
+The baseline models for supervised and unsupervised detection are not required to generate the dataset and are therefore provided separately in the `Example_Use` folder, together with its own [README](Example_Use/README.md). They serve as a starting point for further development and as a benchmark for future research on spectrum anomaly detection in OFDMA systems.
 
 ## Citation
 
 If you are using the code or dataset in this repository, please cite the following paper:
 
 ```bibtex
-@misc{schösser2026spectrumanomalydetectionofdma,
+@misc{schoesser2026spectrumanomalydetectionofdma,
       title={Spectrum Anomaly Detection in OFDMA Systems: Simulation Framework and Benchmark Dataset}, 
       author={Anton Schösser and Mohammadhadi Salehi and Sinuo Ma and Philipp Schulz and Gerhard Fettweis},
       year={2026},
