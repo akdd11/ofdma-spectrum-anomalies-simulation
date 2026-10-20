@@ -665,7 +665,6 @@ if __name__ == "__main__":
         np.asarray(labels["jammer_type"]),
         supervised=cfg.split.supervised,
         unsupervised=cfg.split.unsupervised,
-        left_out_types=tuple(cfg.split.left_out_types),
     )
     labels["split_supervised"] = split_supervised
     labels["split_unsupervised"] = split_unsupervised

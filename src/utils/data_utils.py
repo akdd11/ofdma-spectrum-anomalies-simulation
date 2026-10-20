@@ -389,7 +389,6 @@ def generate_dataset_splits(
     jammer_types,
     supervised,
     unsupervised,
-    left_out_types=("random_hop",),
 ):
     """Generate fixed-count train/valid/test split columns for the dataset.
 
@@ -397,11 +396,12 @@ def generate_dataset_splits(
     fixed number of samples per class is taken positionally from the
     (generation-order) sample sequence -- the first ``num_train_*`` samples of
     a class go to train, the next ``num_valid_*`` to valid, and the *last*
-    ``num_test_*`` samples of the class go to test. Anomaly counts are divided
-    evenly across jammer types, with ``left_out_types`` (e.g. ``random_hop``)
-    held out of training/validation entirely for out-of-distribution
-    generalization testing. See the "Data Splits" section in the README for
-    the full rationale.
+    ``num_test_*`` samples of the class go to test.
+    Anomaly counts are given per jammer type, and every jammer type is
+    assigned to train/valid (supervised) and test. To evaluate generalization
+    to a jammer type unseen during training, the samples of the held-out type
+    are dropped from train and valid by the user; the test set stays the
+    same.
 
     Parameters
     ----------
@@ -411,19 +411,12 @@ def generate_dataset_splits(
         be in generation order, since the split is positional.
     supervised : Mapping
         ``num_train_normal``, ``num_valid_normal``, ``num_test_normal``,
-        ``num_train_anomaly``, ``num_valid_anomaly``, ``num_test_anomaly``. The
-        anomaly counts are divided evenly across the jammer types not in
-        ``left_out_types`` (train/valid) resp. across every jammer type (test).
+        ``num_train_anomaly_per_type``, ``num_valid_anomaly_per_type``,
+        ``num_test_anomaly_per_type``.
     unsupervised : Mapping
         ``num_train_normal``, ``num_valid_normal``, ``num_test_normal``,
-        ``num_test_anomaly`` (unsupervised never trains/validates on anomaly
-        samples). The test anomaly count is divided evenly across every
-        jammer type.
-    left_out_types : tuple of str
-        Jammer types that are only ever assigned to the test split (for
-        supervised learning), so that they can be used to evaluate
-        generalization to a jammer type unseen during training. They are
-        never assigned to train/valid in either protocol. Default: ``("random_hop",)``.
+        ``num_test_anomaly_per_type`` (unsupervised never trains/validates on
+        anomaly samples).
 
     Returns
     -------
@@ -440,7 +433,6 @@ def generate_dataset_splits(
     split_unsupervised = np.full(len(jammer_types), None, dtype=object)
 
     anomaly_types = [t for t in np.unique(jammer_types) if t != "no jammer"]
-    train_types = [t for t in anomaly_types if t not in left_out_types]
 
     # "no jammer": positional split, independent per protocol
     for split_arr, cfg in (
@@ -461,23 +453,18 @@ def generate_dataset_splits(
             )
         split_arr[idxs[:n_train]] = "train"
         split_arr[idxs[n_train : n_train + n_valid]] = "valid"
-        split_arr[idxs[-n_test:]] = "test"
+        split_arr[idxs[len(idxs) - n_test :]] = "test"
 
-    # anomaly types: train/valid counts divided evenly across train_types
-    # (supervised only), test counts divided evenly across all anomaly_types
-    per_train = supervised["num_train_anomaly"] // len(train_types)
-    per_valid = supervised["num_valid_anomaly"] // len(train_types)
-    per_test_supervised = supervised["num_test_anomaly"] // len(anomaly_types)
-    per_test_unsupervised = unsupervised["num_test_anomaly"] // len(anomaly_types)
+    # anomaly types: fixed counts per type, train/valid for supervised only
+    per_train = supervised["num_train_anomaly_per_type"]
+    per_valid = supervised["num_valid_anomaly_per_type"]
+    per_test_supervised = supervised["num_test_anomaly_per_type"]
+    per_test_unsupervised = unsupervised["num_test_anomaly_per_type"]
 
     for jammer_type in anomaly_types:
         idxs = np.where(jammer_types == jammer_type)[0]
-        is_train_type = jammer_type in train_types
 
-        needed_supervised = (
-            per_train + per_valid if is_train_type else 0
-        ) + per_test_supervised
-        if needed_supervised > len(idxs):
+        if per_train + per_valid + per_test_supervised > len(idxs):
             raise ValueError(
                 f"Not enough '{jammer_type}' samples ({len(idxs)}) to satisfy"
                 f" the supervised per-type train/valid/test counts"
@@ -489,13 +476,12 @@ def generate_dataset_splits(
                 f" the unsupervised per-type test count ({per_test_unsupervised})."
             )
 
-        if is_train_type:
-            split_supervised[idxs[:per_train]] = "train"
-            split_supervised[idxs[per_train : per_train + per_valid]] = "valid"
+        split_supervised[idxs[:per_train]] = "train"
+        split_supervised[idxs[per_train : per_train + per_valid]] = "valid"
 
         # test split taken from the end, independently per protocol
-        split_supervised[idxs[-per_test_supervised:]] = "test"
-        split_unsupervised[idxs[-per_test_unsupervised:]] = "test"
+        split_supervised[idxs[len(idxs) - per_test_supervised :]] = "test"
+        split_unsupervised[idxs[len(idxs) - per_test_unsupervised :]] = "test"
 
     return split_supervised, split_unsupervised
 

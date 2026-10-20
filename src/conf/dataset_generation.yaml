@@ -93,20 +93,19 @@ logging: False
 # details). Fixed sample counts per protocol, reproducing the split used for
 # the paper submission: for each class, samples are taken positionally in
 # generation order -- the first num_train_* go to train, the next
-# num_valid_* to valid, and the *last* num_test_* to test. Anomaly counts
-# are divided evenly across jammer types (train/valid only across types not
-# in left_out_types; test across every type, including left_out_types).
+# num_valid_* to valid, and the *last* num_test_* to test.
+# Anomaly counts are per jammer type; every type is assigned to train/valid
+# and test. To hold out a jammer type, drop its samples from train and valid.
 split:
-  left_out_types: ["random_hop"]  # only assigned to test, never train/valid (OOD generalization eval)
   supervised:
     num_train_normal: 5900
     num_valid_normal: 100
     num_test_normal: 1000
-    num_train_anomaly: 5900
-    num_valid_anomaly: 100
-    num_test_anomaly: 2500
+    num_train_anomaly_per_type: 1475  # 4 x 1475 = 5900 with one type held out
+    num_valid_anomaly_per_type: 25
+    num_test_anomaly_per_type: 500
   unsupervised:
     num_train_normal: 8800
     num_valid_normal: 200
     num_test_normal: 1000
-    num_test_anomaly: 2500
+    num_test_anomaly_per_type: 500

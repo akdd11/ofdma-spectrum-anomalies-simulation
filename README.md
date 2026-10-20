@@ -132,15 +132,28 @@ The dataset comes with a predefined train/valid/test split for supervised and un
 | | Supervised | Unsupervised |
 |---|---|---|
 | Normal train / valid / test | 5900 / 100 / 1000 | 8800 / 200 / 1000 |
-| Anomaly train / valid | 5900 / 100 (1475 / 25 per type, without `random_hop`) | - |
-| Anomaly test | 2500 (500 per type, including `random_hop`) | 2500 (500 per type) |
+| Anomaly train / valid | 1475 / 25 per type | - |
+| Anomaly test | 2500 (500 per type) | 2500 (500 per type) |
 
-`random_hop` is excluded from the supervised training and validation sets, to evaluate the generalization to a jammer type unseen during training. Following the evaluation protocol of the paper (Sec. IV-C), a sample is labeled as anomalous if a jammer is present, irrespective of whether it is perceptible at every SU. Normalization statistics (e.g., mean and variance, or minimum and maximum) must be computed on the training or validation set only, never on the test set; for min-max normalization, a margin above the training maximum is recommended, since jammed samples can exceed the training range. The AUC is recommended as the primary metric.
+For supervised learning, one jammer type is held out to evaluate the generalization to a jammer type unseen during training. To hold out the jammer type `k`, drop its samples from the training **and** the validation set:
+
+```python
+k = "random_hop"  # held-out jammer type
+train = df[(df.split_supervised == "train") & (df.jammer_type != k)]
+valid = df[(df.split_supervised == "valid") & (df.jammer_type != k)]
+test = df[df.split_supervised == "test"]
+```
+
+For every held-out type, this gives 5900 normal and 5900 jammed training samples (4 x 1475) and 100 normal and 100 jammed validation samples (4 x 25). The test set contains all 5 jammer types and is the same for every held-out type. The AUC on the held-out type (normal test samples vs. test samples of type `k`) measures the generalization to an unseen jammer type, the AUCs on the other 4 types the detection of jammer types seen during training. Repeat this for each of the 5 jammer types and report the results per held-out type.
+
+**NOTE**: Filtering on `split_supervised == "train"` alone trains on all 5 jammer types, so that no jammer type is unseen during training.
+
+Following the evaluation protocol of the paper (Sec. IV-C), a sample is labeled as anomalous if a jammer is present, irrespective of whether it is perceptible at every SU. Normalization statistics (e.g., mean and variance, or minimum and maximum) must be computed on the training or validation set only, never on the test set; for min-max normalization, a margin above the training maximum is recommended, since jammed samples can exceed the training range. The AUC is recommended as the primary metric.
 
 <details>
 <summary>Split rules and configuration</summary>
 
-The assignments are computed by `src/custom_data_export.py` (`generate_dataset_splits` in `src/utils/data_utils.py`). The split is positional: within each class, the first `num_train_*` samples (by sample index) go to train, the next `num_valid_*` to valid, and the *last* `num_test_*` to test; samples in between remain unassigned (empty). Anomaly counts are divided evenly across the jammer types. The types in `left_out_types` (default `random_hop`) are only assigned to the test set. Since the test samples are taken from the end of each class for both protocols, both protocols share the same test set as long as their `num_test_*` counts match (as by default). The counts and `left_out_types` are configured under `split:` in `src/conf/dataset_generation.yaml`.
+The assignments are computed by `src/custom_data_export.py` (`generate_dataset_splits` in `src/utils/data_utils.py`). The split is positional: within each class, the first `num_train_*` samples (by sample index) go to train, the next `num_valid_*` to valid, and the *last* `num_test_*` to test; samples in between remain unassigned (empty). Anomaly counts are given per jammer type (`num_*_anomaly_per_type`), and every jammer type is assigned to the training, validation, and test sets; holding out a jammer type is left to the user, as described above. Since the test samples are taken from the end of each class for both protocols, both protocols share the same test set as long as their `num_test_*` counts match (as by default). The counts are configured under `split:` in `src/conf/dataset_generation.yaml`.
 
 </details>
 
