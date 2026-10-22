@@ -12,7 +12,6 @@ import matplotlib.patches as patches
 import numpy as np
 
 import scipy.signal as scsig
-import tensorflow as tf
 import yaml
 
 import sionna.rt as srt
@@ -474,44 +473,6 @@ def plot_frequency_responses(fft_freq, h, num_jammers=0):
                 fig, ax = plt.subplots(2, 6, figsize=(18, 8))
 
 
-def map_symbols_to_overall_resource_grid(assigned_rbs, x_rg, cfg):
-    """Map the symbols to the resource grid spanning the whole monitored bandwidth.
-
-    Parameters
-    ----------
-    assigned_rbs : np.ndarray
-        Boolean array of the resource blocks assigned to the transmitter.
-    x_rg : np.ndarray
-        Array of the mapped symbols in the transmitter-specific resource grid.
-    cfg : object
-        Configuration object containing system parameters.
-
-    Returns
-    -------
-    overall_res : np.ndarray
-        Array of the symbols in the overall resource grid.
-    """
-
-    # identify smallest assigned subcarrier (included) and largest assigned subcarrier (excluded)
-    assigned_sc_low = np.where(assigned_rbs)[0].min() * cfg.subcarriers_per_rb
-    assigned_sc_high = (np.where(assigned_rbs)[0].max() + 1) * cfg.subcarriers_per_rb
-    # indexes of the assigned slots
-    assigned_slots = np.unique(np.where(assigned_rbs)[1])
-
-    assigned_res = np.zeros(
-        (cfg.num_subcarriers, cfg.symbols_per_slot * cfg.n_slots), dtype=np.complex64
-    )
-
-    # put the symbols in the correct place in the overall resource grid
-    for slot_idx_rg, slot_idx in enumerate(assigned_slots):
-        assigned_res[
-            assigned_sc_low:assigned_sc_high,
-            slot_idx * cfg.symbols_per_slot : (slot_idx + 1) * cfg.symbols_per_slot,
-        ] = tf.transpose(x_rg[slot_idx_rg, :, :])
-
-    return assigned_res
-
-
 def scale_time_signal_to_target_power(time_signal, target_power):
     """Scale the time signal to the target power.
 
@@ -758,8 +719,7 @@ def create_spectrograms(sample, cfg, h, l_min, su_hardware, noise=False):
                 ),
                 cfg.nfft,
                 cfg.nfft + cfg.cp_len,
-                cfg.subcarrier_spacing * cfg.nfft,
-                50,  # dynamic range in dB for plotting
+                dynamic_range=50,  # dynamic range in dB for plotting
                 plot=True,
             )
 

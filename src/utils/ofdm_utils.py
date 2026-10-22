@@ -4,14 +4,13 @@
 * Resource allocation
 * Creation of user and jammer signals
 * Spectrogram calculation and processing
-* Upsampling and filtering of resource grid and spectrograms
+* Upsampling of the resource grid
 """
 
 __docformat__ = "numpy"
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.interpolate import interp1d
 import scipy.signal as scsig
 from sionna.phy.mapping import Mapper as ConstellationMapper
 import seaborn as sns
@@ -791,32 +790,6 @@ def crop_spectrogram_to_bandwidth(spec, idx_first_sc, num_sc):
     return spec[idx_first_sc : idx_first_sc + num_sc, :]
 
 
-def upsample_axis_of_2d_array(arr, new_dim, axis):
-    """Upsample a 2D array along a specified axis using linear interpolation.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        2D array to upsample.
-    new_dim : int
-        New dimension size for the specified axis.
-    axis : int
-        Axis along which to upsample (0 or 1).
-
-    Returns
-    -------
-    upsampled_array : np.ndarray
-        Upsampled 2D array.
-    """
-
-    # upsample to actual number of time bins in the spectrogram
-    x_old = np.linspace(0, 1, arr.shape[1])
-    x_new = np.linspace(0, 1, new_dim)
-    interp_func = interp1d(x_old, arr, kind="nearest", axis=axis)
-
-    return interp_func(x_new)
-
-
 def jammer_mask_on_stft_grid(
     jammer_signal_freq,
     add_cp,
@@ -888,33 +861,3 @@ def jammer_mask_on_stft_grid(
                 mask[:, col] |= occupied[:, block]
 
     return mask
-
-
-def average_power_per_subcarrier(spec, allocated_resources_upsampled):
-    """Calculate the average power per subcarrier in the spectrogram and
-    replace the value on each subcarrier with the average power along the
-    particular subcarrier along the time axis.
-
-    Parameters
-    ----------
-    spec : np.ndarray
-        Spectrogram (in linear scale) to process.
-    allocated_resources_upsampled : np.ndarray
-        Array of allocated resources, where True indicates an allocated resource.
-
-    Returns
-    -------
-    spec : np.ndarray
-        Processed spectrogram with average power per subcarrier.
-    """
-
-    # Replace the value on each subcarrier with the average power
-    for sc_idx in range(spec.shape[0]):
-        if allocated_resources_upsampled[sc_idx].sum() > 0:
-            allocated = spec[sc_idx, allocated_resources_upsampled[sc_idx].astype(bool)]
-            average = np.power(
-                10, np.mean(np.log10(np.abs(allocated)))
-            )  # factor 20 cancels out
-            spec[sc_idx, allocated_resources_upsampled[sc_idx].astype(bool)] = average
-
-    return spec
