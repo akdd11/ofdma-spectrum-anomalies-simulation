@@ -12,7 +12,7 @@ The three steps towards generating a dataset, namely scene generation, data gene
 
 ## Scene generation
 
-The key of this simulation is a scene, in which ray tracing is executed to obtain channel frequency responses (CFRs) between transmitters and sensing units. The corresponding scene is created with a Python script in Blender, which creates the scene and exports it in a format that can be loaded by Sionna. The scene used to generate the dataset, together with the sensing units and a random set of legitimate transmitters and a jammer, is shown in the figure below.
+The key of this simulation is a scene, in which ray tracing is executed to obtain the propagation paths between transmitters and sensing units, from which the discrete channel taps (band-limited channel impulse responses) are computed. The corresponding scene is created with a Python script in Blender, which creates the scene and exports it in a format that can be loaded by Sionna. The scene used to generate the dataset, together with the sensing units and a random set of legitimate transmitters and a jammer, is shown in the figure below.
 
 <p align="center">
     <img src="./figures/scene0_render.png" width="500">

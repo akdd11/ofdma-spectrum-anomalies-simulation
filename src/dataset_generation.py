@@ -145,14 +145,7 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
         diffraction=bool(cfg.sionna.diffraction),
     )
 
-    # calculate the channel frequency response
-    h = paths.cfr(
-        fft_freq,
-        sampling_frequency=cfg.subcarrier_spacing * cfg.nfft,
-        normalize_delays=False,
-        normalize=False,
-        out_type="numpy",
-    )
+    path_sets = [paths]
 
     # remove the legitimate transmitters from the scene
     for tx_idx in range(len(sample.transmitters)):
@@ -181,28 +174,37 @@ def generate_sample(cfg, scene, jammer_type, su_hardware):
             refraction=True,
             diffraction=bool(cfg.sionna.diffraction),
         )
-        h_jam = paths_jam.cfr(
-            fft_freq,
-            sampling_frequency=cfg.subcarrier_spacing * cfg.nfft,
-            normalize_delays=False,
-            normalize=False,
-            out_type="numpy",
-        )
-
-        # combine the CFRs of the authorized transmitters if the jammer is present
-        h = np.concatenate((h, h_jam), axis=2)  # axis 2 in the index of the tx
+        path_sets.append(paths_jam)
 
         # remove the jammers from the scene
         for jam_idx, jam in enumerate(sample.jammers):
             scene.remove(f"jam{jam_idx}")
 
+    # calculate the channel taps on a lag range shared by the authorized
+    # transmitters and the jammer, which is the last entry of the tx axis
+    sampling_frequency = cfg.subcarrier_spacing * cfg.nfft
+    l_min, l_max = rt_utils.channel_tap_range(
+        path_sets, sampling_frequency, cfg.sionna.cir_tap_margin
+    )
+    h = np.concatenate(
+        [
+            rt_utils.compute_channel_taps(p, sampling_frequency, l_min, l_max)
+            for p in path_sets
+        ],
+        axis=2,  # axis 2 is the index of the tx
+    )
+
     # Create spectrograms -------------------------------------------------------------------------
 
     if cfg.plots.frequency_responses:
-        rt_utils.plot_frequency_responses(fft_freq, h, len(sample.jammers))
+        rt_utils.plot_frequency_responses(
+            fft_freq, rt_utils.taps_to_cfr(h, l_min, cfg.nfft), len(sample.jammers)
+        )
 
     # use the assigned resources together with the assigned resources to create the spectrograms
-    sample = rt_utils.create_spectrograms(sample, cfg, h, su_hardware, noise=True)
+    sample = rt_utils.create_spectrograms(
+        sample, cfg, h, l_min, su_hardware, noise=True
+    )
 
     if cfg.plots.all_spectrograms:
         sample.plot_all_spectrograms()
@@ -412,6 +414,7 @@ if __name__ == "__main__":
         cfg.nfft - num_subcarriers
     ) // 2  # index of the lowest subcarrier in the FFT that is potentially in use
     symbol_duration = cfg.slot_length / cfg.symbols_per_slot
+    # absolute frequencies of the FFT bins, only used to plot frequency responses
     fft_freq = (
         srt.utils.subcarrier_frequencies(cfg.nfft, cfg.subcarrier_spacing) + cfg.f_c
     )

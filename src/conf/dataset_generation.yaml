@@ -78,6 +78,8 @@ sionna:
   num_rays: 1e6           # Number of rays started per source. With diffraction 1e5 is not
                           # converged (single links up to ~20 dB off vs. 1e6); 1e6 costs ~0.1 s/sample
   diffraction: True       # Wedge diffraction (cabinet edges/corners), passed to the path solver.
+  cir_tap_margin: 64      # Sinc taps of the channel kept before lag 0 and after the largest path delay.
+                          # Truncation error of the in-band CFR: ~-48 dB at 64 (worst-case fractional delay).
 
 plots:
   jammer_spectrogram: False

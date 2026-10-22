@@ -538,32 +538,128 @@ def scale_time_signal_to_target_power(time_signal, target_power):
     return time_signal
 
 
-def h_to_cir(h, su_idx, tx_idx):
-    """Return the time representation of the channel (CIR).
+def channel_tap_range(paths_list, sampling_frequency, margin):
+    """Range of time lags covering the delays of all given path sets.
+
+    The range is shared by all path sets of a sample, so that the resulting
+    channel taps can be stacked along the transmitter axis.
 
     Parameters
     ----------
-    h : np.ndarray
-        Array of the complex channel frequency responses.
-        Shape according to sionna output, i.e.,
-        [num_rx, num_rx_ant, num_tx, num_tx_ant, num_time_steps, num_frequencies].
-    su_idx : int
-        Index of the SU.
-    tx_idx : int
-        Index of the transmitter.
+    paths_list : list of sionna.rt.Paths
+        Path sets computed by the path solver.
+    sampling_frequency : float
+        Sampling frequency of the simulated time signals in Hz.
+    margin : int
+        Number of sinc taps kept before lag 0 and after the largest path delay.
 
     Returns
     -------
-    cir : np.ndarray
-        Channel impulse response.
+    l_min : int
+        Smallest time lag in samples (negative).
+    l_max : int
+        Largest time lag in samples.
     """
-    return np.fft.ifft(
-        np.fft.fftshift(h[su_idx, 0, tx_idx, 0, 0, :].flatten()),
+    max_delay = 0.0
+    for paths in paths_list:
+        tau = paths.tau.numpy()
+        if tau.size > 0:
+            max_delay = max(max_delay, float(np.max(tau)))  # invalid paths have tau = -1
+
+    return -margin, int(np.ceil(max_delay * sampling_frequency)) + margin
+
+
+def compute_channel_taps(paths, sampling_frequency, l_min, l_max):
+    """Discrete baseband channel taps on the sample grid of the simulation.
+
+    Computed with sinc interpolation of the absolute path delays (Sionna's
+    `Paths.taps`). In contrast to the IFFT of the CFR, the taps are not
+    circular: the pre-cursor sidelobes of fractional delays sit at negative
+    lags and do not wrap around to lags of about `nfft`, where they would place
+    a copy of each OFDM symbol into the window of the next one.
+
+    Parameters
+    ----------
+    paths : sionna.rt.Paths
+        Paths computed by the path solver.
+    sampling_frequency : float
+        Sampling frequency of the simulated time signals in Hz. It is also the
+        bandwidth the channel is limited to, so that the taps are spaced by one
+        sample.
+    l_min : int
+        Smallest time lag in samples, must not be positive.
+    l_max : int
+        Largest time lag in samples.
+
+    Returns
+    -------
+    taps : np.ndarray
+        Complex channel taps for the lags `l_min, ..., l_max`. Shape according
+        to sionna output, i.e.,
+        [num_rx, num_rx_ant, num_tx, num_tx_ant, num_time_steps, l_max - l_min + 1].
+    """
+    return paths.taps(
+        bandwidth=sampling_frequency,
+        l_min=l_min,
+        l_max=l_max,
+        normalize=False,
+        normalize_delays=False,
+        out_type="numpy",
     )
 
 
-def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
-    """Create spectrograms for a sample with the given frequency response for each SU.
+def apply_channel_taps(signal, taps, l_min, out_len):
+    """Convolve a time signal with channel taps starting at lag `l_min`.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Transmitted time signal.
+    taps : np.ndarray
+        Channel taps for the lags `l_min, l_min + 1, ...`.
+    l_min : int
+        Time lag of the first tap in samples, must not be positive.
+    out_len : int
+        Length of the returned signal.
+
+    Returns
+    -------
+    received : np.ndarray
+        Received time signal, aligned with the transmitted one (lag 0 maps to
+        the same sample index) and truncated to `out_len` samples.
+    """
+    assert l_min <= 0, "the first tap must not lie after lag 0"
+    return scsig.convolve(signal, taps)[-l_min : -l_min + out_len]
+
+
+def taps_to_cfr(taps, l_min, nfft):
+    """Channel frequency response of channel taps on the FFT grid.
+
+    Parameters
+    ----------
+    taps : np.ndarray
+        Channel taps along the last axis for the lags `l_min, l_min + 1, ...`.
+    l_min : int
+        Time lag of the first tap in samples.
+    nfft : int
+        Number of FFT points.
+
+    Returns
+    -------
+    h : np.ndarray
+        Channel frequency response with zero frequency in the centre, same
+        shape as `taps` except for the last axis, which has `nfft` entries.
+    """
+    lags = np.arange(l_min, l_min + taps.shape[-1]) % nfft
+    cir = np.zeros(taps.shape[:-1] + (nfft,), dtype=complex)
+    for tap_idx, lag in enumerate(lags):
+        cir[..., lag] += taps[..., tap_idx]
+
+    return np.fft.fftshift(np.fft.fft(cir, axis=-1), axes=-1)
+
+
+def create_spectrograms(sample, cfg, h, l_min, su_hardware, noise=False):
+    """Create spectrograms for a sample with the given channel taps for each SU.
 
     Parameters
     ----------
@@ -572,7 +668,11 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
     cfg : OmegaConf
         Configuration object.
     h : np.ndarray
-        Array of the complex channel frequency responses.
+        Array of the complex channel taps, see `compute_channel_taps`.
+        Shape [num_rx, num_rx_ant, num_tx, num_tx_ant, num_time_steps, num_taps],
+        the jammer being the last transmitter.
+    l_min : int
+        Time lag of the first tap in samples, must not be positive.
     su_hardware : pd.DataFrame
         Per-SU hardware impairment parameters, as returned by
         `impairment_utils.generate_su_hardware_params`. Only read from if
@@ -725,14 +825,9 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
         signal_time = np.zeros(signal_len, dtype=complex)
         for tx_idx in range(len(sample.transmitters)):
 
-            # convert CFR to time domain and convolve the signal with the channel
-            cir = h_to_cir(h, su_idx, tx_idx)
-
-            # causal convolution, truncated to the original length. mode="same"
-            # must not be used here: the CIR has nfft taps, so it would recenter
-            # the output by nfft // 2 samples and thereby shift the signal by
-            # about half an OFDM symbol against the STFT window grid.
-            signal_time += scsig.convolve(user_signals_time[tx_idx], cir)[:signal_len]
+            signal_time += apply_channel_taps(
+                user_signals_time[tx_idx], h[su_idx, 0, tx_idx, 0, 0, :], l_min, signal_len
+            )
 
         if lo_offset_enabled:
             signal_time = signal_time * su_lo_rotation
@@ -779,11 +874,9 @@ def create_spectrograms(sample, cfg, h, su_hardware, noise=False):
                 sample.jammer_occupancy = float(np.mean(jammer_mask))
 
             # assuming the channel of the jammer is the last one in the axis of the transmitters
-            cir = h_to_cir(h, su_idx, -1)
-
-            jammer_signal_time_after_channel = scsig.convolve(
-                jammer_signal_time, cir
-            )[:signal_len]
+            jammer_signal_time_after_channel = apply_channel_taps(
+                jammer_signal_time, h[su_idx, 0, -1, 0, 0, :], l_min, signal_len
+            )
 
             if lo_offset_enabled:
                 jammer_signal_time_after_channel = (
