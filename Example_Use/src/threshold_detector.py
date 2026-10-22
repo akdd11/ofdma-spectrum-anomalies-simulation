@@ -191,32 +191,25 @@ def plot_roc(scores, jammer_types, filename):
     the ROC curves of the VAE and ResNet in Notebooks/Evaluation.ipynb.
     """
     plt.rcParams["font.family"] = "Times New Roman"
-    plt.rcParams["font.size"] = 8
+    plt.rcParams["font.size"] = 9
     plt.rcParams["pdf.fonttype"] = 42  # embed TrueType instead of Type 3 fonts
 
     normal = jammer_types == NO_JAMMER
-    plt.figure(figsize=(4.6, 4.9))
+    # 3.0 in wide, so that two ROC plots fit next to each other on an A4 page
+    fig, ax = plt.subplots(figsize=(3.0, 2.6), layout="constrained")
     for jammer in JAMMER_TYPES:
         mask = normal | (jammer_types == jammer)
         fpr, tpr, _ = roc_curve(jammer_types[mask] == jammer, scores[mask])
-        plt.plot(fpr, tpr, label=f"{JAMMER_NAMES[jammer]} ({auc(fpr, tpr):.2f})")
+        ax.plot(fpr, tpr, label=f"{JAMMER_NAMES[jammer]} ({auc(fpr, tpr):.2f})")
+    ax.plot([0, 1], [0, 1], ls="--", lw=0.7, color="0.6")
+    ax.grid(True, lw=0.4, color="0.85")
 
-    plt.plot([0, 1], [0, 1], linestyle="--", color="k", alpha=0.2)
-    plt.grid(True)
-    plt.xlabel("False Positive Rate", fontsize=17)
-    plt.ylabel("True Positive Rate", fontsize=17)
-    plt.subplots_adjust(left=0.16)
-
-    plt.yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    plt.tick_params(axis="y", labelsize=17)
-
-    plt.xticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    plt.tick_params(axis="x", labelsize=17)
-
-    plt.legend(fontsize=14, loc="lower right")
+    ax.set(xlim=(0, 1), ylim=(0, 1.01),
+           xlabel="False positive rate", ylabel="True positive rate")
+    ax.legend(loc="lower right")
     # no creation date, so that regenerating an unchanged figure gives an identical file
-    plt.savefig(filename, metadata={"CreationDate": None})
-    plt.close()
+    fig.savefig(filename, metadata={"CreationDate": None})
+    plt.close(fig)
 
 
 # Main Routine --------------------------------------------
