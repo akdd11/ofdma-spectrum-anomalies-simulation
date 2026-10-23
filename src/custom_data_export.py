@@ -6,9 +6,10 @@ as a single per-dataset HDF5 file. Select the format via ``--output-format``
 quantization (see below) and produce identical values, just packaged
 differently on disk.
 
-Spectrograms are clipped to a percentile-based value range (see
+Spectrograms are clipped to a dataset-wide value range (see
 `compute_clipping_values`) before being scaled to 8 bit, so that the
-limited 8-bit resolution is not dominated by rare outlier values. In addition,
+limited 8-bit resolution is not wasted on the far tail below the noise floor,
+while no normal (non-jammed) spectrogram is clipped at the top. In addition,
 it generates a labels file containing, for each sample, the jammer type, power
 and location, the number of legitimate transmitters, the per-SU SNR, SJR and
 jammer impact metrics, and the train/valid/test split assignments. Also, a
@@ -79,14 +80,17 @@ def append_jammer_location(labels, location):
         labels[column].append(float(coordinate))
 
 
-# Percentiles used to derive the clipping range for the 8-bit PNG conversion.
-# The lower bound is taken from the distribution of all spectrogram values
-# (jammed and non-jammed), the upper bound only from jammed samples, since
-# jammer power is the anomaly-relevant signal and must not be clipped away
-# too aggressively. Values were chosen based on the analysis in
-# `notebooks/analyze_clipping_percentiles.ipynb`.
+# Parameters of the clipping range for the 8-bit PNG conversion. The lower
+# bound is a percentile of the distribution of all spectrogram values (jammed
+# and non-jammed): below the noise floor, the distribution has a long, thin
+# tail (datasets 2/3: minimum ~-175 dB, p0.01 ~-113 dB, p0.1 ~-103 dB), so
+# discarding its lowest 0.1% of values improves the resolution ~1.6x compared
+# to clipping at the dataset minimum, without touching signal-bearing values.
+# The upper bound is the maximum value of all non-jammed samples plus a
+# margin, so that no normal spectrogram is clipped (see
+# `compute_clipping_values`).
 CLIP_LOW_PERCENTILE = 0.1
-CLIP_HIGH_PERCENTILE_JAMMED = 99.99
+CLIP_HIGH_MARGIN_DB = 6.0
 CLIP_HISTOGRAM_BINS = 4000
 
 # Generously wide value range assumed to fix the histogram bin edges up
@@ -127,30 +131,25 @@ def _weighted_percentile(bin_edges, counts, percentile):
 def compute_clipping_values(
     filenames,
     low_percentile=CLIP_LOW_PERCENTILE,
-    high_percentile_jammed=CLIP_HIGH_PERCENTILE_JAMMED,
+    high_margin_db=CLIP_HIGH_MARGIN_DB,
     num_bins=CLIP_HISTOGRAM_BINS,
     assumed_value_range=ASSUMED_VALUE_RANGE_DB,
 ):
     """Compute the clipping range used to scale spectrograms into 8-bit PNGs.
 
-    The dataset-wide value range (min/max across all samples) is much wider
-    than what most samples actually use, since a small fraction of extreme
-    outlier values dominate it. Clipping to a percentile-based range before
-    the min-max normalization therefore recovers substantially more of the
-    8-bit resolution for the value range that samples actually occupy.
+    The lower clip bound is a percentile of the distribution of all
+    spectrogram values. The dataset minimum lies far below the noise floor,
+    so clipping there recovers substantially more of the 8-bit resolution
+    for the value range that samples actually occupy.
 
-    The lower clip bound is computed from the distribution of all spectrogram
-    values, since low values are dominated by the noise floor and carry no
-    anomaly-relevant information. The upper clip bound is computed only from
-    samples that contain a jammer, since jammer power is exactly the signal
-    an anomaly detector needs to see, and clipping it based on the full
-    (mostly non-jammed) distribution would cut it too aggressively.
+    The upper clip bound is the maximum value over all non-jammed samples
+    plus ``high_margin_db``.
 
-    Both percentiles are estimated from histograms built in a single pass
-    over the sample files (using ``assumed_value_range`` for the bin edges),
-    so memory usage stays independent of the dataset size and the sample
-    files only need to be read once here (matching the one read for image
-    generation afterwards).
+    The percentile is estimated from a histogram built in a single pass over
+    the sample files (using ``assumed_value_range`` for the bin edges), in
+    which the normal maximum is tracked as well, so memory usage stays
+    independent of the dataset size and the sample files only need to be
+    read once here (matching the one read for image generation afterwards).
 
     Parameters
     ----------
@@ -158,10 +157,11 @@ def compute_clipping_values(
         List of filenames containing the samples.
     low_percentile : float
         Percentile (over all samples) used for the lower clip bound.
-    high_percentile_jammed : float
-        Percentile (over jammed samples only) used for the upper clip bound.
+    high_margin_db : float
+        Margin in dB added to the maximum value of all non-jammed samples to
+        obtain the upper clip bound.
     num_bins : int
-        Number of histogram bins used to estimate the percentiles.
+        Number of histogram bins used to estimate the percentile.
     assumed_value_range : tuple of float
         (min, max) used to fix the histogram bin edges up front. Must safely
         contain the actual data range; violations are reported as a warning.
@@ -178,12 +178,12 @@ def compute_clipping_values(
         assumed_value_range[0], assumed_value_range[1], num_bins + 1
     )
     hist_all = np.zeros(num_bins, dtype=np.int64)
-    hist_jammed = np.zeros(num_bins, dtype=np.int64)
 
     min_val = np.inf
     max_val = -np.inf
+    max_val_normal = -np.inf
 
-    p_bar = tqdm(total=len(filenames), desc="Building value histograms")
+    p_bar = tqdm(total=len(filenames), desc="Building value histogram")
     for filename in filenames:
         with open(filename, "rb") as f:
             samples = pkl.load(f)
@@ -193,10 +193,10 @@ def compute_clipping_values(
                 values = sample.spectrograms[su_idx]
                 min_val = min(min_val, np.min(values))
                 max_val = max(max_val, np.max(values))
+                if not is_jammed:
+                    max_val_normal = max(max_val_normal, np.max(values))
                 hist, _ = np.histogram(values.ravel(), bins=bin_edges)
                 hist_all += hist
-                if is_jammed:
-                    hist_jammed += hist
         del samples  # free memory
         p_bar.update(1)
 
@@ -207,16 +207,27 @@ def compute_clipping_values(
             f"Spectrogram values ({min_val} to {max_val}) exceed the assumed "
             f"histogram range {assumed_value_range} (ASSUMED_VALUE_RANGE_DB). "
             "Values outside this range were excluded from the percentile "
-            "estimate, which may bias the resulting clip bounds. Consider "
-            "widening ASSUMED_VALUE_RANGE_DB."
+            "estimate, which may bias the resulting lower clip bound. "
+            "Consider widening ASSUMED_VALUE_RANGE_DB."
         )
 
+    if not np.isfinite(max_val_normal):
+        # e.g. small test datasets that only contain jammed samples
+        warnings.warn(
+            "No non-jammed samples found, the upper clip bound is derived from "
+            "the maximum of all (jammed) samples instead."
+        )
+        max_val_normal = max_val
+
     clip_min = _weighted_percentile(bin_edges, hist_all, low_percentile)
-    clip_max = _weighted_percentile(bin_edges, hist_jammed, high_percentile_jammed)
+    clip_max = float(max_val_normal) + high_margin_db
 
     print(f"Value range: {min_val} to {max_val}")
     print(f"Clip min (p{low_percentile} of all values): {clip_min}")
-    print(f"Clip max (p{high_percentile_jammed} of jammed values): {clip_max}")
+    print(
+        f"Clip max (max of non-jammed values {max_val_normal} + "
+        f"{high_margin_db} dB): {clip_max}"
+    )
 
     return clip_min, clip_max
 
