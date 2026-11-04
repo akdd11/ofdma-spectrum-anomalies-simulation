@@ -14,7 +14,7 @@ Download the dataset from the following link:
 
  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20341906.svg)](https://doi.org/10.5281/zenodo.20341906)
 
-After downloading the dataset, unzip and place it inside the `Example_Use/Dataset` directory.
+After downloading the dataset, extract the files and specify the path to the extracted data directory in `..//datapath.txt`.
 
 ---
 
@@ -40,37 +40,37 @@ pip install -r requirements.txt
 To train the unsupervised (VAE) model, run:
 
 ```bash
-python src/train_unsupervised.py --data_path ".\Dataset" --Max_LR 1e-4
+python src/train_unsupervised.py
 ```
 
-To train the supervised (ResNet) model, run:
+To train the supervised model, run:
 
 ```bash
-python src/train_unsupervised.py --data_path ".\Dataset" --Max_LR 1e-2
+python src/train_supervised.py
 ```
 
-Or, to fine-tune the ResNet18 model using the pretrained weights located at `initial_path`, run:
+To exclude specific jammer types from the training set, use the --jammers_excluded argument followed by the names of the jammers you want to exclude:
 
 ```bash
-python src/train_unsupervised.py --data_path ".\Dataset" --Max_LR 1e-2 --initial_weights "initial_path"
+python src/train_supervised.py --jammers_excluded 'jammer1' 'jammer2'
+```
+
+---
+
+# Evaluation
+
+To obtain anomaly scores for each jammer type using the selected detection method, run `src/Test.py` with the corresponding arguments.
+
+For example, to evaluate the unsupervised method on barrage and deceptive jammers, run:
+
+```bash
+python src/Test.py --approach "unsupervised" --jammers 'barrage', 'deceptive'
 ```
 
 
 The trained weights are provided in the `Example_Use/Weights` directory. 
-
----
-
-# Threshold-based Baseline
-
-A non-learned energy detector is provided in `src/threshold_detector.py`. It uses the same input as the VAE, i.e., the spectrograms aggregated to RBs on the frequency axis. For every SU and time-frequency bin (RB x OFDM symbol), the power threshold is a quantile of the received power of the normal training samples (`split_unsupervised == "train"`). The anomaly score is the largest exceedance of this threshold map, z-normalized per SU on the normal validation samples and averaged over the SUs. The ROC curve and AUC per jammer type are computed on the test split as for the VAE. Run:
-
-```bash
-python src/threshold_detector.py --quantiles 0.5 0.9 0.95 0.99 0.999
-```
-
-The dataset is taken from the datasets folder given in `datapath.txt` of the repository root, with the dataset number from `src/conf/dataset_generation.yaml` (override with `-d`). For every quantile, the ROC curve (PDF), the AUC per jammer type and jammer power, and the scores of the validation and test samples (e.g., to compute F1 with a threshold on the validation scores) are written to `Results/threshold` (relative to `Example_Use`, change with `--out_dir`). The spectrograms are loaded with the utilities in `src/utils/data_utils.py` of the repository root.
-
-You can use the jupyter notebooks provided to evaluate each method and visualise the detected anomalies for each sample.
+You can use the jupyter notebooks provided to evaluate obtained anomaly scores. 
+Additionally, you can visualize the anomalies detected by the VAE model for each sample.
 
 
 ---
