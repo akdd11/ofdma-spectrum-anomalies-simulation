@@ -23,15 +23,16 @@ _module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
 sys.path.append(os.path.abspath(_module_path))
 
 from utils.functions import set_random, load_config
-from src.data_loading import SpectralImagesUnsupervised, load_labels
+from src.data_loading import SpectralImagesUnsupervised, load_labels, get_datapath
 from src.models import Encoder, Decoder
 
 
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 set_random(42)
+
 
 config_path = os.path.join(_module_path, "src", "config.yml")
 config = load_config(config_path)
-
 
 # ------------------------------------------------
 # Batch size for train and inference 
@@ -51,10 +52,11 @@ base_transform = trans.Compose(
 
 train_transform = trans.Compose(
     [
-        trans.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
+        #trans.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
         base_transform,
     ]
 )
+
 
 # ------------------------------------------------
 # Data Loading 
@@ -62,24 +64,24 @@ train_transform = trans.Compose(
 
 def get_dataset(root, df, load_dt_images=True):
 
-    num_train_normal = int(config["unsupervised"]["num_train_normal"])
-    num_valid_normal = int(config["unsupervised"]["num_valid_normal"])
-    normal = df[df["jammer_type"] == 'no jammer']
-
-    train_samples = normal[:num_train_normal]
+    train_samples = df[df["split_unsupervised"] == "train"]
     trainset = SpectralImagesUnsupervised(
         root,
         transform=train_transform,
         dataframe=train_samples,
         load_dt_images=load_dt_images,
+        data_type="train",
     )
 
-    normal_valid_samples = normal[num_train_normal:num_train_normal+num_valid_normal]
+    normal_valid_samples = df[df["split_unsupervised"] == "valid"]
     normal_validset = SpectralImagesUnsupervised(
         root,
         transform=base_transform,
         dataframe=normal_valid_samples,
         load_dt_images=load_dt_images,
+        data_type="valid",
+        max = trainset.max,
+        min = trainset.min,
     )
 
     trainloader = DataLoader(
@@ -149,16 +151,17 @@ def train(
 
                 optimizer.zero_grad()
 
-                mu, sigma = encoder(combined_inputs)
-                epsilon = torch.randn_like(sigma).to(device)
-                z = mu + sigma * epsilon
+                mu, log_var = encoder(combined_inputs)
+                std = torch.exp(0.5 * log_var)
+                epsilon = torch.randn_like(std).to(device)
+                z = mu + std * epsilon
                 decoded_x = decoder(z)
                 r_loss = reconstruction_loss(
                     decoded_x, combined_targets
                     )
-                kl = (
-                    -0.5 * torch.sum(1 + sigma - mu.pow(2) - sigma.exp())
-                    ) / orig_img.shape[0]
+                kl = -0.5 * torch.mean(
+                    1 + log_var - mu.pow(2) - log_var.exp()
+                    )
                 
                 loss = r_loss + 0.0001 * kl
 
@@ -167,10 +170,9 @@ def train(
                 
                 loss.backward()
                 optimizer.step()
-
-
-                if scheduler != None:
-                    scheduler.step()
+            
+            if scheduler != None:
+                scheduler.step()
 
             log.add_scalar("Rec_Loss/Train", np.nanmean(r_list), global_step=epoch)
             log.add_scalar("KL_Loss/Train", np.nanmean(kl_list), global_step=epoch)
@@ -189,15 +191,15 @@ def train(
                     img = img.float()
                     img = img.to(device)
 
-                    mu, sigma = encoder(img)
-                    epsilon = torch.randn_like(sigma).to(device)
-                    z = mu + sigma * epsilon
+                    mu, log_var = encoder(img)
+                    std = torch.exp(0.5 * log_var)
+                    epsilon = torch.randn_like(std).to(device)
+                    z = mu + std * epsilon
                     decoded_x = decoder(z)
                     v_r_loss = reconstruction_loss(decoded_x, img)
-                    v_kl = (
-                        -0.5 * torch.sum(1 + sigma - mu.pow(2) - sigma.exp())
-                    ) / img.shape[0]
-
+                    v_kl = -0.5 * torch.mean(
+                        1 + log_var - mu.pow(2) - log_var.exp()
+                        )
                     valid_Rec_loss.append(v_r_loss.item())
                     valid_kl_loss.append(v_kl.item())
 
@@ -237,16 +239,19 @@ def train(
 
 
 if __name__ == "__main__":
-
     # ------------------------------------------------
     # Parse arguments
     # ------------------------------------------------
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=str, required=True)
-    parser.add_argument("--Max_LR", type=float, required=True)
-    args = parser.parse_args()
-    data_path = args.data_path
-    max_lr = args.Max_LR
+    #parser = argparse.ArgumentParser()
+    #parser.add_argument(
+    #    "--data_path", 
+    #    type=str,
+    #    help= "The path for the dataset", 
+    #    required=True,
+    #    )
+    
+    #args = parser.parse_args()
+    #data_path = args.data_path
 
     # ------------------------------------------------
     # GPU setup
@@ -266,8 +271,11 @@ if __name__ == "__main__":
         Multiple_GPU = False
 
     now = datetime.datetime.now().strftime("%m%d-%H%M%S")
+    data_path = get_datapath(_repo_name)
     df = load_labels(data_path)
+    max_lr = 0.001
     trainloader, normal_validloader = get_dataset(data_path, df, load_dt_images=False)
+
 
     # ------------------------------------------------
     # Model, Optimizer, and Scheduler setup
@@ -276,15 +284,20 @@ if __name__ == "__main__":
     decoder = Decoder()
     encoder = encoder.to(device)
     decoder = decoder.to(device)
-    
+
     n_epochs = config["hyperparameters"]["unsupervised"]["n_epochs"]
-    reconstruction_loss = nn.BCELoss()
+    #n_epochs = 300
+
+    reconstruction_loss = nn.L1Loss()
     optimizer = torch.optim.Adam(
-            itertools.chain(encoder.parameters(), decoder.parameters()), lr=0.1
+            itertools.chain(encoder.parameters(), decoder.parameters()), lr=max_lr
         )
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr, epochs=n_epochs, steps_per_epoch=len(trainloader), pct_start=0.2,
-            )
+
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=[100, 200],
+            gamma=0.1  # Multiply LR by 0.1 at each milestone
+        )
 
     # ------------------------------------------------
     # Training Loop
@@ -301,8 +314,3 @@ if __name__ == "__main__":
         normal_validloader,
         reconstruction_loss,
     )
-
-    if Multiple_GPU:
-        torch.distributed.destroy_process_group()
-    else:
-        print("Finished!")

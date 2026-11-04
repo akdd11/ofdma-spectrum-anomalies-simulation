@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
+from torchvision.models import resnet18, ResNet18_Weights
 
 import os
 import sys
@@ -159,7 +159,7 @@ class Decoder(nn.Module):
     def __init__(
         self,
         latent_dim=latent_dim,
-        base_channels=16,
+        base_channels=32,
         img_channels=1,
         img_height=img_size_time,
         img_width=img_size_freq,
@@ -247,7 +247,7 @@ class ResNet18classification(nn.Module):
         super(ResNet18classification, self).__init__()
 
         # load resnet18
-        self.model = models.resnet18(weights=None)
+        self.model = resnet18(weights=None)
 
         if weights_path is not None:
             state_dict = torch.load(weights_path, weights_only=True)
@@ -264,3 +264,90 @@ class ResNet18classification(nn.Module):
 
     def forward(self, x):
         return self.model(x)  # raw logits 
+
+
+
+# ResNet Regression --------------------------------------------
+
+class ResNet18Regression(nn.Module):
+    def __init__(self, pretrained=True, freeze_backbone=False):
+        super().__init__()
+
+        # ------------------------------------------------
+        # Load pretrained ResNet18
+        # ------------------------------------------------
+        weights = ResNet18_Weights.DEFAULT if pretrained else None
+        self.backbone = resnet18(weights=weights)
+
+        # ResNet18 feature dimension before the classifier
+        n_features = self.backbone.fc.in_features  # 512
+
+        # ------------------------------------------------
+        # Change input from 3-channel RGB -> 1-channel
+        # ------------------------------------------------
+        old_conv = self.backbone.conv1
+
+        self.backbone.conv1 = nn.Conv2d(
+            in_channels=21,
+            out_channels=64,
+            kernel_size=7,
+            stride=2,
+            padding=3,
+            bias=False,
+        )
+
+        # Initialize the 1-channel convolution from
+        # pretrained RGB weights
+        if pretrained:
+            with torch.no_grad():
+                self.backbone.conv1.weight.copy_(
+                    old_conv.weight.mean(dim=1, keepdim=True)
+                )
+
+        # ------------------------------------------------
+        # Remove the original ImageNet classifier
+        # ------------------------------------------------
+        self.backbone.fc = nn.Identity()
+
+        # ------------------------------------------------
+        # Optional: freeze feature extractor
+        # ------------------------------------------------
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+
+        # ------------------------------------------------
+        # Regression head
+        # ------------------------------------------------
+        self.regressor = nn.Linear(n_features, 21)
+
+        self.non_linear = nn.Sigmoid()
+
+    def forward(self, x):
+        # [B, 1, H, W] -> [B, 512]
+        features = self.backbone(x)
+
+        # [B, 512] -> [B, 1] -> [B]
+        pred = self.regressor(features)
+
+        return self.non_linear(pred.squeeze(1))
+
+
+# Two FC Layer for Classification ------------------------------
+
+class VectorClassifier(nn.Module):
+    def __init__(self, input_dim, hidden_dim=32):
+        super().__init__()
+
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, x):
+        return self.network(x).squeeze(-1)
+
+

@@ -1,1 +1,0 @@
-Please place the downloaded dataset in this directory.
