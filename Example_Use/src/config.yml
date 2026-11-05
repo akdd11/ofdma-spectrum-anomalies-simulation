@@ -18,7 +18,7 @@ model:
 
   channels: 1  # number of image channels
   n_SUs: 21
-dataset_nr: 4
+dataset_nr: 3  # subfolder of the datasets folder given in datapath.txt of the repository root
 
 # data split config
 supervised:

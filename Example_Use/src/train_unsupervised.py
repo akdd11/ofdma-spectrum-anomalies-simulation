@@ -23,7 +23,7 @@ _module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
 sys.path.append(os.path.abspath(_module_path))
 
 from utils.functions import set_random, load_config
-from src.data_loading import SpectralImagesUnsupervised, load_labels, get_datapath
+from src.data_loading import SpectralImagesUnsupervised, load_labels, get_dataset_path
 from src.models import Encoder, Decoder
 
 
@@ -252,6 +252,15 @@ if __name__ == "__main__":
     
     #args = parser.parse_args()
     #data_path = args.data_path
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-d",
+        "--dataset_number",
+        type=int,
+        default=config["dataset_nr"],
+        help="Dataset number, i.e., subfolder of the datasets folder given in datapath.txt of the repository root (default: dataset_nr in src/config.yml)",
+    )
+    args = parser.parse_args()
 
     # ------------------------------------------------
     # GPU setup
@@ -271,7 +280,7 @@ if __name__ == "__main__":
         Multiple_GPU = False
 
     now = datetime.datetime.now().strftime("%m%d-%H%M%S")
-    data_path = get_datapath(_repo_name)
+    data_path = get_dataset_path(args.dataset_number)
     df = load_labels(data_path)
     max_lr = 0.001
     trainloader, normal_validloader = get_dataset(data_path, df, load_dt_images=False)

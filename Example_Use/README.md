@@ -14,7 +14,7 @@ Download the dataset from the following link:
 
  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20341906.svg)](https://doi.org/10.5281/zenodo.20341906)
 
-After downloading the dataset, extract the files and specify the path to the extracted data directory in `..//datapath.txt`.
+After downloading the dataset, extract the files and specify the path to the datasets folder (the folder that contains the numbered dataset folders, e.g. `3/`) in `../datapath.txt`. The dataset number is set by `dataset_nr` in `src/config.yml`; all scripts accept `-d <dataset number>` to override it.
 
 ---
 
@@ -69,8 +69,20 @@ python src/Test.py --approach "unsupervised" --jammers 'barrage', 'deceptive'
 
 
 The trained weights are provided in the `Example_Use/Weights` directory. 
-You can use the jupyter notebooks provided to evaluate obtained anomaly scores. 
-Additionally, you can visualize the anomalies detected by the VAE model for each sample.
+You can use the jupyter notebooks provided to evaluate obtained anomaly scores (`Notebooks/Metrics.ipynb`, `Notebooks/Plots.ipynb`, which read the scores from `Anomaly_Scores`).
+Additionally, you can visualize the anomalies detected by the VAE model for each sample (`Notebooks/Visualisation.ipynb`).
+
+---
+
+# Threshold-based Baseline
+
+A non-learned energy detector is provided in `src/threshold_detector.py`. It uses the same input as the VAE, i.e., the spectrograms aggregated to RBs on the frequency axis. For every SU and time-frequency bin (RB x OFDM symbol), the power threshold is a quantile of the received power of the normal training samples (`split_unsupervised == "train"`). The anomaly score is the largest exceedance of this threshold map, z-normalized per SU on the normal validation samples and averaged over the SUs. The ROC curve and AUC per jammer type are computed on the test split as for the VAE. Run:
+
+```bash
+python src/threshold_detector.py --quantiles 0.5 0.9 0.95 0.99 0.999
+```
+
+The dataset is taken from the datasets folder given in `datapath.txt` of the repository root, with the dataset number `dataset_nr` from `src/config.yml` (override with `-d`). For every quantile, the ROC curve (PDF), the AUC per jammer type and jammer power, and the scores of the validation and test samples (e.g., to compute F1 with a threshold on the validation scores) are written to `Results/threshold` (relative to `Example_Use`, change with `--out_dir`). The spectrograms are loaded with the utilities in `src/utils/data_utils.py` of the repository root.
 
 
 ---

@@ -23,42 +23,43 @@ from utils.functions import aggregate_subcarriers
 
 # Datapath ----------------------------------------------------
 
-def get_datapath(repo_name: str):
-    """Get the path to the dataset directory.
+def get_dataset_path(dataset_nr: int) -> str:
+    """Get the path to a dataset: ``<datasets folder from datapath.txt>/<dataset_nr>``.
+
+    The datasets folder is read with ``get_datapath`` of ``src/utils/data_utils.py`` in the
+    repository root, i.e., the same convention as the dataset generation and
+    ``threshold_detector.py``. Example_Use has its own ``src`` package, so the module of the
+    repository root is loaded from its file path instead of being imported by name.
 
     Parameters
     ----------
-    repo_name : str
-        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation
+    dataset_nr : int
+        The dataset number, i.e., the subfolder of the datasets folder.
 
     Returns
     -------
-    datapath: str
+    dataset_path : str
         The path to the dataset directory.
     """
-    module_path = __file__[: __file__.find(repo_name)]
-    with open(os.path.join(module_path, "datapath.txt"), "r") as f:
-        lines = f.readlines()
+    import importlib.util
 
-    for idx, line in enumerate(lines):
-        if line.strip().startswith("#") or line.strip().startswith("<"):
-            continue
-
-        if len(line.strip()) > 1:
-            if os.path.isdir(line.strip()):
-                
-                print("Data Path: ", line.strip())
-
-                return line.strip()
-            else:
-                print(
-                    f"Line {idx + 1} in datapath.txt does not point to a valid directory: {line.strip()}"
-                )
-
-    raise ValueError(
-        "No valid datapath found in the datapath.txt file. "
-        "Please check the file and ensure it contains a valid path."
+    repo_root = os.path.dirname(os.path.abspath(_module_path))
+    spec = importlib.util.spec_from_file_location(
+        "repo_data_utils", os.path.join(repo_root, "src", "utils", "data_utils.py")
     )
+    repo_data_utils = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(repo_data_utils)
+
+    dataset_path = os.path.join(
+        repo_data_utils.get_datapath(os.path.basename(repo_root)), str(dataset_nr)
+    )
+    if not os.path.isdir(dataset_path):
+        raise ValueError(
+            f"Dataset {dataset_nr} not found: {dataset_path} does not exist. Check datapath.txt "
+            "(datasets folder) and dataset_nr in src/config.yml (or the -d argument)."
+        )
+    print("Data Path: ", dataset_path)
+    return dataset_path
 
 
 
@@ -123,7 +124,7 @@ class SpectralImagesUnsupervised(Dataset):
             self.min = None
         
         self.transform = transform  
-        self.dir = os.path.join(path, "Images")  # directory where spectrogram PNGs are stored
+        self.dir = os.path.join(path, "images")  # directory where spectrogram PNGs are stored
         self.id = []  
         self.frames = []
         self.jammer = []  # list to hold jam type labels (string initially, mapped later)
@@ -237,7 +238,7 @@ class SpectralImagesSupervised(Dataset):
             raise NotImplementedError("Loading dt_images is currently not implemented.")
 
         self.transform = transform
-        self.dir = os.path.join(path, "Images")
+        self.dir = os.path.join(path, "images")
         self.id = []
         self.frames = []
         self.jammer = []
@@ -340,7 +341,7 @@ class SpectralImagesRegressionClassification(Dataset):
 
 
         self.transform = transform  
-        self.dir = os.path.join(path, "Images")  # directory where spectrogram PNGs are stored
+        self.dir = os.path.join(path, "images")  # directory where spectrogram PNGs are stored
         self.id = []  
         self.frames = []
         self.sjrs = []
@@ -405,9 +406,12 @@ class SpectralImagesRegressionClassification(Dataset):
                 self.min = train_min - 0.1*g
                 self.max = train_max + 0.1*g
                 
+                # SJR is inf at SUs without jammer power (all SUs of a sample without
+                # jammer), so the normalisation range only uses the finite values
                 sjrs = np.asarray(self.sjrs)
-                self.sjr_max = np.max(sjrs[np.isfinite(sjrs)])
-                self.sjr_min = np.min(sjrs)
+                finite = np.isfinite(sjrs)
+                self.sjr_max = np.max(sjrs[finite])
+                self.sjr_min = np.min(sjrs[finite])
 
             #print(f"maximum and minimum values used for spectrum normalisation: {self.max}, {self.min} ")
 
@@ -428,12 +432,10 @@ class SpectralImagesRegressionClassification(Dataset):
 
                 assert r.shape[0] == 21, "number of sensing units are not equal to 21"
 
-                if np.any(np.isinf(r)):
-                    self.sjrs[i] = np.ones_like(r)
-                else:
-                    
-                    normalised_vector = (r - self.sjr_min) / (self.sjr_max - self.sjr_min)
-                    self.sjrs[i] = normalised_vector
+                # Normalise per SU. An infinite SJR only affects its own SU: +inf (no jammer
+                # power at this SU) -> 1, -inf -> 0. Previously, a single inf SU set the whole
+                # vector to 1, discarding the finite SJRs of the other SUs.
+                self.sjrs[i] = np.clip((r - self.sjr_min) / (self.sjr_max - self.sjr_min), 0.0, 1.0)
 
             # Print available label distribution (strings) for debugging
             print(f"\n------ Samples for {data_type} ------")
@@ -493,7 +495,7 @@ class SpectralImagesSample(Dataset):
         self.min = min
     
         self.transform = transform  
-        self.dir = os.path.join(path, "Images")  # directory where spectrogram PNGs are stored
+        self.dir = os.path.join(path, "images")  # directory where spectrogram PNGs are stored
         self.id = []
         self.frames = []  
         self.jammer = []  # list to hold jam type labels (string initially, mapped later)

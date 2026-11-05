@@ -9,7 +9,7 @@ The anomaly score of a spectrogram is the largest exceedance of the threshold ma
 its SU (in dB). The per-SU scores are z-normalized per SU on the normal validation
 samples and averaged over the SUs, which gives one score per sample.
 
-The evaluation follows the VAE in Notebooks/Evaluation.ipynb:
+The evaluation follows the VAE in src/Test.py and Notebooks/Metrics.ipynb:
 - the threshold map is fitted on the normal samples of split_unsupervised == "train",
   the per-SU normalization uses split_unsupervised == "valid",
 - ROC curve and AUC per jammer type against the normal samples of
@@ -21,7 +21,7 @@ ROC curves and threshold-based metrics (e.g., F1 with the threshold at a percent
 of the normal validation scores, as for the VAE) can be recomputed from scores.csv.
 
 The dataset is <datasets folder from datapath.txt>/<dataset number>, as for the
-scripts in <repo>/src.
+scripts in <repo>/src. The default dataset number is dataset_nr in Example_Use/src/config.yml.
 
 Usage:
     python src/threshold_detector.py [-d <dataset number>] [--quantiles 0.5 0.9 0.95 0.99 0.999]
@@ -70,7 +70,7 @@ NUM_SC_PER_RB = 12
 def get_split(df):
     """
     Sample indices of the unsupervised split (identical to the slicing of
-    train_unsupervised.py and Notebooks/Evaluation.ipynb with config.yml).
+    train_unsupervised.py and Test.py with config.yml).
     """
     if "split_unsupervised" not in df.columns:
         raise KeyError(
@@ -188,7 +188,7 @@ def auc_table(scores, jammer_types, jammer_powers):
 def plot_roc(scores, jammer_types, filename):
     """
     ROC curve per jammer type against the normal test samples, in the style of
-    the ROC curves of the VAE and ResNet in Notebooks/Evaluation.ipynb.
+    the ROC curves of the VAE and the supervised model in Notebooks/Plots.ipynb.
     """
     plt.rcParams["font.family"] = "Times New Roman"
     plt.rcParams["font.size"] = 9
@@ -291,8 +291,8 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # default dataset number from the dataset generation config
-    with open(os.path.join(_repo_root, "src", "conf", "dataset_generation.yaml")) as f:
+    # default dataset number from the Example_Use config (shared with the VAE and the supervised models)
+    with open(os.path.join(_example_use_path, "src", "config.yml")) as f:
         default_dataset_nr = yaml.safe_load(f)["dataset_nr"]
 
     parser = argparse.ArgumentParser(description="Energy detector baseline with one threshold per time-frequency bin")

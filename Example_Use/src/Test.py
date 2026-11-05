@@ -30,7 +30,7 @@ sys.path.append(os.path.abspath(_module_path))
 
 from utils.functions import set_random, load_config, Jammers_Lebel_Assignment, Validation_Scores, Test_Scores
 from src.models import ResNet18Regression, VectorClassifier, Encoder, Decoder
-from src.data_loading import SpectralImagesUnsupervised, load_labels, SpectralImagesRegressionClassification, get_datapath
+from src.data_loading import SpectralImagesUnsupervised, load_labels, SpectralImagesRegressionClassification, get_dataset_path
 from src.train_unsupervised import base_transform
 
 
@@ -271,6 +271,14 @@ if __name__ == "__main__":
         help="List of jammers we want to have in our test set",
     )
 
+    parser.add_argument(
+        "-d",
+        "--dataset_number",
+        type=int,
+        default=config["dataset_nr"],
+        help="Dataset number, i.e., subfolder of the datasets folder given in datapath.txt of the repository root (default: dataset_nr in src/config.yml)",
+    )
+
     args = parser.parse_args()
 
     #args = parser.parse_args()
@@ -278,7 +286,7 @@ if __name__ == "__main__":
     approach = args.approach
     jammers_test = args.jammers
 
-    data_path = get_datapath(_repo_name)
+    data_path = get_dataset_path(args.dataset_number)
 
     df = load_labels(data_path)
 
@@ -305,12 +313,10 @@ if __name__ == "__main__":
         decoder = Decoder()
             
         encoder.load_state_dict(
-            #torch.load("./Weights/OUT/VAE_0819-122054/encoder_final.pt", map_location = device, weights_only=True),
             torch.load("./Weights/OUT/VAE_1027-220937/encoder_final.pt", map_location = device, weights_only=True),
             strict=False
             )
         decoder.load_state_dict(
-            #torch.load("./Weights/OUT/VAE_0819-122054/decoder_final.pt", map_location = device, weights_only=True),
             torch.load("./Weights/OUT/VAE_1027-220937/decoder_final.pt", map_location = device, weights_only=True),
             strict=False
             )

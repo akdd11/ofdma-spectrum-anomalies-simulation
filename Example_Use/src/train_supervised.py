@@ -22,7 +22,7 @@ sys.path.append(os.path.abspath(_module_path))
 
 from utils.functions import set_random, load_config
 from src.models import ResNet18Regression, VectorClassifier
-from src.data_loading import load_labels, SpectralImagesRegressionClassification, get_datapath
+from src.data_loading import load_labels, SpectralImagesRegressionClassification, get_dataset_path
 from src.train_unsupervised import base_transform
 
 
@@ -368,6 +368,13 @@ if __name__ == "__main__":
         help="List of jammers to exclude", 
         required=False,
         )
+    parser.add_argument(
+        "-d",
+        "--dataset_number",
+        type=int,
+        default=config["dataset_nr"],
+        help="Dataset number, i.e., subfolder of the datasets folder given in datapath.txt of the repository root (default: dataset_nr in src/config.yml)",
+    )
     
     args = parser.parse_args()
     #data_path = args.data_path
@@ -391,7 +398,7 @@ if __name__ == "__main__":
         Multiple_GPU = False
 
     now = datetime.datetime.now().strftime("%m%d")
-    data_path = get_datapath(_repo_name)
+    data_path = get_dataset_path(args.dataset_number)
     df = load_labels(data_path)
     train_loader, valid_loader = get_dataset(data_path, df, excluded=jammers_excluded, load_dt_images=False)
     
