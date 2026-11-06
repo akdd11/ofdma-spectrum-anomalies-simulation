@@ -12,7 +12,7 @@ Here we implement and evaluate two approches for anomaly detection in OFDMA syst
 
 Download the dataset from the following link:
 
- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20341906.svg)](https://doi.org/10.5281/zenodo.20341906)
+ [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24004707.svg)](https://doi.org/10.5281/zenodo.24004707)
 
 After downloading the dataset, extract the files and specify the path to the datasets folder (the folder that contains the numbered dataset folders, e.g. `3/`) in `../datapath.txt`. The dataset number is set by `dataset_nr` in `src/config.yml`; all scripts accept `-d <dataset number>` to override it.
 

@@ -6,7 +6,7 @@ This repository belongs to the paper "Spectrum Anomaly Detection in OFDMA System
 
 The dataset is available for download at Zenodo:
 
- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20341906.svg)](https://doi.org/10.5281/zenodo.20341906)
+ [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24004707.svg)](https://doi.org/10.5281/zenodo.24004707)
 
 The three steps towards generating a dataset, namely scene generation, data generation, and creating image data and labels, are described in the following sections.
 
