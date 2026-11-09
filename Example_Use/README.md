@@ -14,7 +14,7 @@ Download the dataset from the following link:
 
  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24004707.svg)](https://doi.org/10.5281/zenodo.24004707)
 
-After downloading the dataset, extract the files and specify the path to the datasets folder (the folder that contains the numbered dataset folders, e.g. `3/`) in `../datapath.txt`. The dataset number is set by `dataset_nr` in `src/config.yml`; all scripts accept `-d <dataset number>` to override it.
+After downloading the dataset, put the files into the subfolder `3` of a datasets folder and extract `images.zip` there, i.e., `<datasets folder>/3/images/`, `<datasets folder>/3/labels.csv`, etc. Then specify the path to the datasets folder (the folder that contains `3/`, not `3/` itself) in the second line of `../datapath.txt`. 3 is the number of the published dataset (Zenodo version 2.0) and the default `dataset_nr` in `src/config.yml`; all scripts accept `-d <dataset number>` to use another dataset folder. If the files are not found, the error message names the most likely cause. See [Using the downloaded dataset](../README.md#using-the-downloaded-dataset) in the main README for details.
 
 ---
 

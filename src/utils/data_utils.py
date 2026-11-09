@@ -31,14 +31,18 @@ def get_datapath(repo_name: str):
     Parameters
     ----------
     repo_name : str
-        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation'
+        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation'.
+        Unused, kept for compatibility: the repository root is located relative to this
+        file, so that it is found irrespective of the name of the repository folder
+        (e.g., '<repo>-main' when downloaded as ZIP from GitHub).
 
     Returns
     -------
     datapath : str
         The path to the dataset directory.
     """
-    module_path = __file__[: __file__.find(repo_name) + len(repo_name)]
+    # this file is <repo root>/src/utils/data_utils.py
+    module_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     with open(os.path.join(module_path, "datapath.txt"), "r") as f:
         lines = f.readlines()
 
@@ -58,6 +62,99 @@ def get_datapath(repo_name: str):
         "No valid datapath found in the datapath.txt file. "
         "Please check the file and ensure it contains a valid path."
     )
+
+
+def _config_dataset_nr(folder: str):
+    """Return ``dataset_nr`` from ``config.yaml`` in ``folder``, or None if not available."""
+    import yaml
+
+    try:
+        with open(os.path.join(folder, "config.yaml"), "r") as f:
+            return yaml.safe_load(f).get("dataset_nr")
+    except (OSError, AttributeError, yaml.YAMLError):
+        return None
+
+
+def get_dataset_path(repo_name: str, dataset_nr: int) -> str:
+    """Get the folder of an exported dataset: ``<datasets folder>/<dataset_nr>``.
+
+    The datasets folder is read from ``datapath.txt`` (see ``get_datapath``). The
+    folder is checked for the files of an exported (or downloaded) dataset, and if
+    they are missing, the error message names the most likely cause: the files were
+    put directly into the datasets folder, into a folder with another number, or
+    ``images.zip`` was not extracted. A warning is printed if the folder number
+    differs from ``dataset_nr`` in the ``config.yaml`` of the dataset.
+
+    Parameters
+    ----------
+    repo_name : str
+        The name of the repository, e.g., 'ofdma-spectrum-anomalies-simulation'
+    dataset_nr : int
+        The dataset number, i.e., the subfolder of the datasets folder.
+
+    Returns
+    -------
+    dataset_path : str
+        The path to the dataset folder.
+    """
+    datasets_folder = get_datapath(repo_name)
+    dataset_path = os.path.join(datasets_folder, str(dataset_nr))
+    hint = (
+        f"Expected layout: {os.path.join(datasets_folder, str(dataset_nr))}"
+        f"{os.sep}{{labels.csv, spectrogram_min_max.csv, config.yaml, images{os.sep}, ...}}, "
+        "with the datasets folder given in datapath.txt of the repository root."
+    )
+
+    if not os.path.isdir(dataset_path):
+        msg = f"Dataset {dataset_nr} not found: {dataset_path} does not exist."
+        if os.path.isfile(os.path.join(datasets_folder, "labels.csv")) and (
+            os.path.basename(os.path.normpath(datasets_folder)) == str(dataset_nr)
+        ):
+            msg += (
+                f" datapath.txt points to the dataset folder itself. Set it to the folder that"
+                f" contains it: {os.path.dirname(os.path.normpath(datasets_folder))}."
+            )
+        elif os.path.isfile(os.path.join(datasets_folder, "labels.csv")):
+            msg += (
+                f" The dataset files are directly in the datasets folder {datasets_folder}."
+                f" Move them into the subfolder {dataset_nr}."
+            )
+        others = {
+            d: _config_dataset_nr(os.path.join(datasets_folder, d))
+            for d in sorted(os.listdir(datasets_folder))
+            if d.isdigit() and os.path.isfile(os.path.join(datasets_folder, d, "labels.csv"))
+        }
+        if others:
+            listing = ", ".join(
+                f"{d} (config.yaml: dataset_nr {nr})" if nr is not None else d
+                for d, nr in others.items()
+            )
+            msg += f" Datasets found: {listing}. Select one with -d <dataset number>."
+        raise FileNotFoundError(f"{msg}\n{hint}")
+
+    has_images = os.path.isdir(os.path.join(dataset_path, "images"))
+    has_h5 = os.path.isfile(os.path.join(dataset_path, "dataset.h5"))
+    if not os.path.isfile(os.path.join(dataset_path, "labels.csv")):
+        raise FileNotFoundError(f"labels.csv not found in {dataset_path}.\n{hint}")
+    if not (has_images or has_h5):
+        msg = f"Neither images{os.sep} nor dataset.h5 found in {dataset_path}."
+        if os.path.isfile(os.path.join(dataset_path, "images.zip")):
+            msg += " Extract images.zip in this folder (it contains the folder images)."
+        raise FileNotFoundError(f"{msg}\n{hint}")
+    if has_images and os.path.isdir(os.path.join(dataset_path, "images", "images")):
+        raise FileNotFoundError(
+            f"The images are in {os.path.join(dataset_path, 'images', 'images')}: images.zip"
+            " was extracted into an extra folder images. Move them one level up."
+        )
+
+    config_nr = _config_dataset_nr(dataset_path)
+    if config_nr is not None and str(config_nr) != str(dataset_nr):
+        warnings.warn(
+            f"The dataset in {dataset_path} was generated as dataset {config_nr}"
+            f" (config.yaml), but is stored in folder {dataset_nr}."
+        )
+
+    return dataset_path
 
 
 def get_spectrogram_img_filenamename(sample_idx: int, su_idx: int):
@@ -546,22 +643,20 @@ def jammer_types_to_binary(jammer_labels: np.ndarray) -> np.ndarray:
 
 if __name__ == "__main__":
 
-    dataset_idx = 2
+    dataset_idx = 3
     sample_idx = 16000
 
-    datapath = get_datapath("ofdma-spectrum-anomalies-simulation")
-    labels_df = pd.read_csv(os.path.join(datapath, str(dataset_idx), "labels.csv"))
+    datapath = get_dataset_path("ofdma-spectrum-anomalies-simulation", dataset_idx)
+    labels_df = pd.read_csv(os.path.join(datapath, "labels.csv"))
 
     import matplotlib.pyplot as plt
 
     spectrograms = load_one_sample_from_images(
-        os.path.join(datapath, str(dataset_idx), "images"), sample_idx, "none"
+        os.path.join(datapath, "images"), sample_idx, "none"
     )
 
     # invert the 8-bit scaling back to dBm using the clipping bounds of the dataset
-    min_max_df = pd.read_csv(
-        os.path.join(datapath, str(dataset_idx), "spectrogram_min_max.csv")
-    )
+    min_max_df = pd.read_csv(os.path.join(datapath, "spectrogram_min_max.csv"))
     v_min = min_max_df["min_val"].values[0]
     v_max = min_max_df["max_val"].values[0]
     spectrograms = v_min + spectrograms / 255 * (v_max - v_min)

@@ -48,7 +48,7 @@ _example_use_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."
 _repo_root = os.path.dirname(_example_use_path)
 sys.path.insert(0, _repo_root)
 
-from src.utils.data_utils import aggregate_spectrograms, get_datapath, load_one_sample_from_images
+from src.utils.data_utils import aggregate_spectrograms, get_dataset_path, load_one_sample_from_images
 
 
 # Constants ---------------------------------------------------
@@ -219,7 +219,7 @@ def score_column(quantile):
 
 
 def main(args):
-    data_path = os.path.join(get_datapath(_repo_name), str(args.dataset_number))
+    data_path = get_dataset_path(_repo_name, args.dataset_number)
     out_dir = os.path.join(_example_use_path, args.out_dir)  # relative paths are relative to Example_Use
     print(f"Dataset: {data_path}")
 

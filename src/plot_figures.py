@@ -33,11 +33,11 @@ from PIL import Image
 
 # import own modules
 _repo_name = "ofdma-spectrum-anomalies-simulation"
-_module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
+_module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repository root
 sys.path.append(os.path.abspath(_module_path))
 
 from src.utils.data_utils import (
-    get_datapath,
+    get_dataset_path,
     get_resource_alloc_img_filenamename,
     get_spectrogram_img_filenamename,
 )
@@ -528,7 +528,7 @@ if __name__ == "__main__":
 
     args = parse_arguments(cfg.dataset_nr)
 
-    datapath = os.path.join(get_datapath(_repo_name), str(args.dataset_number))
+    datapath = get_dataset_path(_repo_name, args.dataset_number)
     print(f"Plotting dataset: {datapath}")
     dataset = Dataset(datapath)
 

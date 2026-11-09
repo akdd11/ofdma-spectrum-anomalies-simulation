@@ -26,10 +26,10 @@ from utils.functions import aggregate_subcarriers
 def get_dataset_path(dataset_nr: int) -> str:
     """Get the path to a dataset: ``<datasets folder from datapath.txt>/<dataset_nr>``.
 
-    The datasets folder is read with ``get_datapath`` of ``src/utils/data_utils.py`` in the
-    repository root, i.e., the same convention as the dataset generation and
-    ``threshold_detector.py``. Example_Use has its own ``src`` package, so the module of the
-    repository root is loaded from its file path instead of being imported by name.
+    Uses ``get_dataset_path`` of ``src/utils/data_utils.py`` in the repository root, i.e.,
+    the same convention and checks as the dataset generation and ``threshold_detector.py``.
+    Example_Use has its own ``src`` package, so the module of the repository root is loaded
+    from its file path instead of being imported by name.
 
     Parameters
     ----------
@@ -50,14 +50,7 @@ def get_dataset_path(dataset_nr: int) -> str:
     repo_data_utils = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(repo_data_utils)
 
-    dataset_path = os.path.join(
-        repo_data_utils.get_datapath(os.path.basename(repo_root)), str(dataset_nr)
-    )
-    if not os.path.isdir(dataset_path):
-        raise ValueError(
-            f"Dataset {dataset_nr} not found: {dataset_path} does not exist. Check datapath.txt "
-            "(datasets folder) and dataset_nr in src/config.yml (or the -d argument)."
-        )
+    dataset_path = repo_data_utils.get_dataset_path(os.path.basename(repo_root), dataset_nr)
     print("Data Path: ", dataset_path)
     return dataset_path
 

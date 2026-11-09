@@ -31,7 +31,7 @@ import sionna.rt as srt
 
 # import own modules
 _repo_name = "ofdma-spectrum-anomalies-simulation"
-_module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
+_module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repository root
 
 from utils import rt_utils, ofdm_utils, impairment_utils
 from utils.data_utils import get_datapath
@@ -329,6 +329,12 @@ def parse_arguments():
         help="Number of samples to generate. If not set, the number of samples from the config file is used.",
     )
 
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite an existing dataset with the same dataset number.",
+    )
+
     args = parser.parse_args()
 
     return args
@@ -366,6 +372,19 @@ if __name__ == "__main__":
 
     if args.num_samples is not None:
         cfg.nr_samples = args.num_samples
+
+    # the default dataset number is the published dataset: do not overwrite it (or any
+    # other existing dataset) by accident
+    dataset_path = os.path.join(_datapath, f"{cfg.dataset_nr}")
+    existing = [
+        f for f in ("config.yaml", "labels.csv", "custom")
+        if os.path.exists(os.path.join(dataset_path, f))
+    ]
+    if existing and not args.overwrite:
+        raise SystemExit(
+            f"Dataset {cfg.dataset_nr} already exists in {dataset_path} (contains {', '.join(existing)})."
+            " Choose a new dataset number with -d <dataset number>, or pass --overwrite."
+        )
 
     # seed the global numpy RNG, which drives every per-sample draw.
     np.random.seed(cfg.seed)

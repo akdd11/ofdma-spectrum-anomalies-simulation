@@ -8,7 +8,8 @@ gpu_id: 0         # Index of the single GPU Sionna RT (Mitsuba/Dr.Jit) should ru
 
 scene_nr: 0       # Scene number
 
-dataset_nr: 2     # Dataset number
+dataset_nr: 3     # Dataset number, i.e., subfolder of the datasets folder in datapath.txt;
+                  # 3 is the published dataset (Zenodo v2.0), use a new number for own datasets
 
 seed: 42          # Seed of the global numpy RNG (scenario, allocation, payload, jammer, noise draws).
 f_c: 3.75e9       # Carrier frequency in Hz

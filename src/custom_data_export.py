@@ -35,7 +35,7 @@ from tqdm import tqdm
 
 # import own modules
 _repo_name = "ofdma-spectrum-anomalies-simulation"
-_module_path = __file__[: __file__.find(_repo_name) + len(_repo_name)]
+_module_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repository root
 sys.path.append(os.path.abspath(_module_path))
 
 from src.utils.ofdm_utils import get_total_allocated_resources

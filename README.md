@@ -8,6 +8,32 @@ The dataset is available for download at Zenodo:
 
  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24004707.svg)](https://doi.org/10.5281/zenodo.24004707)
 
+### Using the downloaded dataset
+
+All scripts find a dataset as `<datasets folder>/<dataset number>`. The datasets folder is set in the file `datapath.txt` in the repository root (second line), the dataset number defaults to `dataset_nr` in `src/conf/dataset_generation.yaml` (and `Example_Use/src/config.yml` for the detection). The default is **3**, the number of the published dataset (Zenodo version 2.0). Hence, put the downloaded files into a subfolder `3` of the datasets folder and extract `images.zip` there:
+
+```
+<datasets folder>/          # path in datapath.txt
+└── 3/                      # dataset number
+    ├── images/             # extracted from images.zip
+    ├── labels.csv
+    ├── spectrogram_min_max.csv
+    ├── su_coordinates.csv
+    ├── su_hardware.csv
+    └── config.yaml
+```
+
+If the files are stored elsewhere, e.g., directly in the datasets folder or in a folder with another number, or if `images.zip` has not been extracted, the scripts stop with an error message that names the problem. A dataset in a folder with another number can be selected with `-d <dataset number>`.
+
+Dataset numbers are generation run IDs; 1 and 2 were internal development runs and are not published. The datasets referred to in this repository are:
+
+| Dataset number | Description |
+|---|---|
+| 0 | Zenodo version 1.0 (previous release) |
+| 3 | Zenodo version 2.0 (current release), the default of all scripts |
+
+The dataset number with which a dataset was generated is stored as `dataset_nr` in its `config.yaml`. A warning is shown if it differs from the number of the folder.
+
 The three steps towards generating a dataset, namely scene generation, data generation, and creating image data and labels, are described in the following sections.
 
 ## Scene generation
@@ -52,7 +78,7 @@ The datasets have been generated with Python 3.12.12 and Sionna (RT) 1.2.1 (Mits
 
 Entry path for the simulation is the script `src/dataset_generation.py`, which executes the ray tracing and creates custom intermediate data. Simulation parameters can be configured in the file `src/conf/dataset_generation.yaml`. The dataset number and number of samples can also be configured via the command line, run with `-h` for details. The coordinates of the sensing units are specified in the file `src/conf/su_coordinates.yaml`.
 
-The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, its content is described in [Dataset folder](#dataset-folder).
+The generated data is stored in the directory that is specified in the file `datapath.txt` which is located in the repository root. In this directory, a subdirectory with the specified dataset number is created, its content is described in [Dataset folder](#dataset-folder). The default configuration reproduces the published dataset 3 (see [Using the downloaded dataset](#using-the-downloaded-dataset)). An existing dataset is not overwritten, the script stops instead; to generate a new dataset, choose a new number with `-d <dataset_number>` (or pass `--overwrite`).
 
 The samples are generated grouped by class, and the sample index (generation order) is the same in all output files. First come the normal samples, followed by one block per jammer type, in the order `deceptive`, `sweep`, `barrage`, `pilot`, `random_hop`. The number of samples per jammer type is `nr_samples * jam_probability / 5` (rounded down), the remaining samples are normal. With the default configuration (20000 samples, `jam_probability: 0.5`), samples 0-9999 are normal, followed by blocks of 2000 samples per jammer type (e.g., `deceptive`: 10000-11999, `random_hop`: 18000-19999).
 
@@ -219,7 +245,7 @@ The figures of the paper (SNR/SJR distribution, resource allocation, and example
 python src/plot_figures.py
 ```
 
-and saved as PDF into the `figures` folder. The script only uses the published data, i.e., the figures can be reproduced from the downloaded dataset.
+and saved as PDF into the `figures` folder. The script only uses the published data, i.e., the figures can be reproduced from the downloaded dataset (dataset 3 by default).
 
 <details>
 <summary>Options and further figures</summary>
