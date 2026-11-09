@@ -16,7 +16,8 @@ The layout follows the original PowerPoint slide; all positions are given in
 inches from the top left corner of the abstract. The slide font is Open Sans;
 if it is not installed, it can be passed with ``--font-dir`` (a folder with,
 e.g., ``OpenSans-Regular.ttf`` and ``OpenSans-Bold.ttf``), otherwise DejaVu Sans
-is used.
+is used. As the fallback font is wider, the abstract is then extended where the
+text would be clipped otherwise.
 
 Usage: ``python src/plot_graphical_abstract.py [-d DATASET_NUMBER] [--font-dir DIR]``
 """
@@ -33,6 +34,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Circle, Polygon
+from matplotlib.transforms import Bbox
 from PIL import Image
 
 # import own modules
@@ -134,6 +136,8 @@ METHODS = {
 AUC_LIM = (0.7, 1.005)
 
 PNG_DPI = 600
+# space added beyond content that exceeds the abstract (e.g., with a fallback font)
+OVERFLOW_MARGIN = 0.1
 
 
 def setup_font(font_dir=None):
@@ -415,6 +419,37 @@ def draw_auc(fig):
     )
 
 
+def content_bbox(fig):
+    """Area of the abstract to save, extended where the content exceeds it.
+
+    With a fallback font, the text is wider than with Open Sans and can exceed
+    the abstract. Instead of clipping it, the abstract is extended on that side
+    by the overflow plus `OVERFLOW_MARGIN`. Sides without overflow are kept, so
+    the abstract is unchanged if everything fits.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The abstract, completely drawn.
+
+    Returns
+    -------
+    bbox : matplotlib.transforms.Bbox
+        Area to save in inches, measured from the bottom left corner.
+    """
+    content = fig.get_tightbbox(fig.canvas.get_renderer())
+    x0 = 0 if content.x0 >= 0 else content.x0 - OVERFLOW_MARGIN
+    y0 = 0 if content.y0 >= 0 else content.y0 - OVERFLOW_MARGIN
+    x1 = WIDTH if content.x1 <= WIDTH else content.x1 + OVERFLOW_MARGIN
+    y1 = HEIGHT if content.y1 <= HEIGHT else content.y1 + OVERFLOW_MARGIN
+    if (x0, y0, x1, y1) != (0, 0, WIDTH, HEIGHT):
+        print(
+            f"Content exceeds the abstract (font {plt.rcParams['font.family'][0]}), "
+            f"extended to {x1 - x0:.2f} x {y1 - y0:.2f} in"
+        )
+    return Bbox.from_extents(x0, y0, x1, y1)
+
+
 def plot_graphical_abstract(dataset, output_path):
     """Draw the graphical abstract and save it as PDF and PNG.
 
@@ -439,8 +474,9 @@ def plot_graphical_abstract(dataset, output_path):
     draw_auc(fig)
 
     filename = os.path.join(output_path, "graphical_abstract")
-    fig.savefig(filename + ".pdf", dpi=PNG_DPI, metadata=PDF_METADATA)
-    fig.savefig(filename + ".png", dpi=PNG_DPI, facecolor="white")
+    bbox = content_bbox(fig)
+    fig.savefig(filename + ".pdf", dpi=PNG_DPI, metadata=PDF_METADATA, bbox_inches=bbox)
+    fig.savefig(filename + ".png", dpi=PNG_DPI, facecolor="white", bbox_inches=bbox)
     plt.close(fig)
     print(f"Saved {filename}.pdf and .png")
 
